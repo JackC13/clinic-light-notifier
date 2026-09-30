@@ -323,8 +323,11 @@ async function addTracking(ctx, { hosp, ampm, sid, number, label = null }) {
   if (rows.length >= MAX_ACTIVE_PER_CHAT) return `❌ 最多同時追蹤 ${MAX_ACTIVE_PER_CHAT} 筆，請先取消一些`;
   const dup = rows.find((r) => r.service_id === sid && r.my_number === number);
   if (dup) return `ℹ️ 已經在追蹤了：${title(dup)}，${number} 號`;
-  if (c.number !== null && c.number >= number) {
-    return `⚠️ ${c.doctor}｜${where(clinic)} 目前燈號 ${c.number}，已經到/超過 ${number} 號，沒有加入追蹤`;
+  // 依報到順序的診不照號碼叫，不用號碼大小擋
+  if (!c.byCheckin && c.number !== null && c.number >= number) {
+    return c.number === number
+      ? `🔔 ${c.doctor}｜${where(clinic)} 目前燈號就是你的 ${number} 號，請直接到診間（不需要追蹤）`
+      : `⚠️ ${c.doctor}｜${where(clinic)} 目前燈號 ${c.number} 已超過你的 ${number} 號，請盡速到診間報到（沒有加入追蹤）`;
   }
 
   let detail = null;
