@@ -1,0 +1,57 @@
+name: 看診燈號提醒
+
+on:
+  workflow_dispatch:
+    inputs:
+      number:
+        description: "我的看診號碼"
+        required: true
+        type: number
+      url:
+        description: "當天這一診的燈號頁網址（ClinicCurrentLightNoDetail?ServiceIDSE=...）"
+        required: true
+        type: string
+      mode:
+        description: "run = 正式監控；dump = 只抓一次看解析結果；test-line = 只測 LINE"
+        required: true
+        default: run
+        type: choice
+        options: [run, dump, test-line]
+
+# 同時只跑一個，避免重複推播；新的會取消舊的
+concurrency:
+  group: clinic-light
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330   # 5.5 小時硬上限，保護免費額度
+    env:
+      LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+      LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Run
+        env:
+          IN_NUMBER: ${{ inputs.number }}
+          IN_URL: ${{ inputs.url }}
+          IN_MODE: ${{ inputs.mode }}
+        run: |
+          echo "::add-mask::$IN_URL"
+          case "$IN_MODE" in
+            dump)      FLAG="--dump" ;;
+            test-line) FLAG="--test-line" ;;
+            *)         FLAG="" ;;
+          esac
+          dotnet run -c Release --no-build -- --number "$IN_NUMBER" --url "$IN_URL" $FLAG

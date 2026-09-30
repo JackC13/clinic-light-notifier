@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+.DS_Store
+# 機密與除錯輸出
+appsettings.local.json
+page.html
+page.txt
