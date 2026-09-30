@@ -40,12 +40,32 @@ async function call(env, path, payload) {
 // LINE 單則文字上限 5000 字
 const clip = (t) => (t.length > 4900 ? t.slice(0, 4900) + "…" : t);
 
-/** 回覆使用者的指令：不計入每月推播額度 */
-export function reply(env, replyToken, text) {
-  return call(env, "/v2/bot/message/reply", {
-    replyToken,
-    messages: [{ type: "text", text: clip(text) }],
-  });
+/** 文字訊息，可附快速回覆按鈕（最多 13 個） */
+export function textMsg(text, quickItems = []) {
+  const msg = { type: "text", text: clip(text) };
+  if (quickItems.length) msg.quickReply = { items: quickItems.slice(0, 13) };
+  return msg;
+}
+
+/** 快速回覆：按下後送出 postback（displayText 會以使用者名義顯示在聊天室） */
+export function quickPostback(label, data, displayText) {
+  return {
+    type: "action",
+    action: { type: "postback", label: label.slice(0, 20), data: JSON.stringify(data), displayText },
+  };
+}
+
+/** 快速回覆：按下後直接送出一段文字 */
+export function quickText(label, text) {
+  return { type: "action", action: { type: "message", label: label.slice(0, 20), text } };
+}
+
+/** 回覆使用者：不計入每月推播額度。msgs 可以是字串或訊息物件（最多 5 則） */
+export function reply(env, replyToken, msgs) {
+  const messages = (Array.isArray(msgs) ? msgs : [msgs])
+    .map((m) => (typeof m === "string" ? textMsg(m) : m))
+    .slice(0, 5);
+  return call(env, "/v2/bot/message/reply", { replyToken, messages });
 }
 
 /** 主動推播：計入每月額度（群組按人數計），多則合併成一則送出 */

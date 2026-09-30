@@ -9,13 +9,13 @@ crons = ["* * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "clinic-light"
-database_id = "REPLACE_WITH_YOUR_DATABASE_ID"   # wrangler d1 create 之後貼上
+database_id = "814d947c-4490-416d-8457-fccad3c51733"
 
 [vars]
 # 允許下指令的聊天室（群組 C… / 個人 U…），逗號分隔
 ALLOWED_CHAT_IDS = "C1e23fee597d0a7a4bc4d0a514ddfa46f,U6bd4189c693945ecf81247047cfcf17f"
-# 只允許追蹤這些網站的網址
-ALLOWED_HOSTS = "reg.ntuh.gov.tw"
+# 用醫師名搜尋時，沒指定院區就查這些院區（CH 兒童醫院、T0 總院）
+SEARCH_HOSPITALS = "CH,T0"
 # 剩幾號時通知
 THRESHOLDS = "10,5,2"
 # 最長追蹤時數，逾時自動移除

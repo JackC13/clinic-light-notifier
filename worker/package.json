@@ -6,7 +6,7 @@
     "test": "node --test test/*.test.js",
     "dev": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute clinic-light --remote --file=schema.sql"
+    "db:migrate": "wrangler d1 migrations apply clinic-light --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

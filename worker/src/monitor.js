@@ -1,7 +1,9 @@
 // 單筆追蹤的狀態判斷（純函式，方便測試）
 //
-// row 欄位：id, my_number, label, last_number, sent, fail_count, fail_alerted,
-//           drop_alerted, created_at, next_check_at
+// row 欄位：id, my_number, label, doctor, room, hosp, ampm, last_number, sent,
+//           fail_count, fail_alerted, drop_alerted, created_at, next_check_at
+
+import { AMPM, hospitalName } from "./ntuh.js";
 
 const MIN = 60_000;
 // cron 每分鐘觸發，提早幾秒讓下一次 cron 一定會挑到
@@ -27,8 +29,13 @@ function int(v, d) {
   return Number.isFinite(n) && n > 0 ? n : d;
 }
 
+/** 例：#3 戴季珊（兒童醫院 下午 01診）小孩 */
 export function title(row) {
-  return row.label ? `#${row.id} ${row.label}` : `#${row.id}`;
+  const where = [row.hosp && hospitalName(row.hosp), row.ampm && AMPM[row.ampm], row.room]
+    .filter(Boolean)
+    .join(" ");
+  const who = row.doctor ? `${row.doctor}${where ? `（${where}）` : ""}` : where;
+  return [`#${row.id}`, who, row.label].filter(Boolean).join(" ");
 }
 
 function parseSent(s) {
@@ -36,8 +43,8 @@ function parseSent(s) {
 }
 
 /**
- * 取得頁面後呼叫。
- * current: 解析出的號碼；null 表示頁面有抓到但沒有號碼（多半是尚未開診）
+ * 讀到該診資料後呼叫。
+ * current: 目前燈號；null 表示尚未開始看診
  * 回傳 { update, messages, done }
  */
 export function onReading(row, current, cfg, now) {
@@ -46,20 +53,21 @@ export function onReading(row, current, cfg, now) {
   const t = title(row);
   const my = row.my_number;
 
-  // 還沒開診（從沒讀到過號碼）→ 安靜等待
+  // 還沒開始看診（從沒讀到過號碼）→ 安靜等待
   if (current === null && row.last_number === null) {
-    update.next_check_at = now + cfg.farMinutes * MIN - SLACK;
+    if (row.fail_alerted) messages.push(`✅ ${t}｜恢復讀取，目前尚未開始看診`);
+    Object.assign(update, { fail_count: 0, fail_alerted: 0, next_check_at: now + cfg.farMinutes * MIN - SLACK });
     return { update, messages, done: false };
   }
   // 讀到過號碼卻突然沒了 → 視同失敗
-  if (current === null) return onFailure(row, cfg, now, "頁面上找不到燈號");
+  if (current === null) return onFailure(row, cfg, now, "燈號消失了");
 
   if (row.fail_alerted) messages.push(`✅ ${t}｜恢復讀取，目前 ${current} 號`);
   update.fail_count = 0;
   update.fail_alerted = 0;
 
   if (row.last_number !== null && current < row.last_number && !row.drop_alerted) {
-    messages.push(`⚠️ ${t}｜燈號從 ${row.last_number} 變成 ${current}（變小了），請確認網址是否為今天這一診`);
+    messages.push(`⚠️ ${t}｜燈號從 ${row.last_number} 變成 ${current}（變小了），請確認是否為今天這一診`);
     update.drop_alerted = 1;
   }
   update.last_number = current;
@@ -89,7 +97,7 @@ export function onReading(row, current, cfg, now) {
   return { update, messages, done: false };
 }
 
-/** 抓取失敗（網路錯誤、HTTP 錯誤、或開診後號碼消失） */
+/** 讀取失敗（網路錯誤、HTTP 錯誤、列表中找不到該診、或開診後號碼消失） */
 export function onFailure(row, cfg, now, reason) {
   const messages = [];
   const failCount = (row.fail_count ?? 0) + 1;
