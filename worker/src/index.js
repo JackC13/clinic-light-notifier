@@ -7,7 +7,7 @@ import { verifySignature, reply, push, textMsg, quickPostback, quickText } from 
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
-import { loadConfig, onReading, onFailure, isExpired, title } from "./monitor.js";
+import { loadConfig, onReading, onFailure, isExpired, title, CHECKIN_NOTE } from "./monitor.js";
 
 const MAX_ACTIVE_PER_CHAT = 10;
 const MAX_PER_TICK = 30;
@@ -222,7 +222,7 @@ function clinicsFlex(clinics, hosp, ampm, n) {
       type: "box", layout: "vertical", paddingBottom: "sm",
       contents: [
         { type: "text", text: head, weight: "bold", size: "md" },
-        { type: "text", text: `第 ${i + 1}/${pages.length} 頁・右側為目前燈號`, size: "xxs", color: "#888888" },
+        { type: "text", text: `第 ${i + 1}/${pages.length} 頁・右側為目前燈號・※ 依報到順序`, size: "xxs", color: "#888888", wrap: true },
       ],
     },
     body: {
@@ -231,7 +231,7 @@ function clinicsFlex(clinics, hosp, ampm, n) {
         type: "button", style: "secondary", height: "sm",
         action: {
           type: "postback",
-          label: `${c.room} ${c.doctor} ${c.number ?? "－"}`.slice(0, 40),
+          label: `${c.room} ${c.doctor} ${c.number ?? "－"}${c.byCheckin ? " ※" : ""}`.slice(0, 40),
           data: JSON.stringify({ a: "s", h: hosp, p: ampm, s: c.sid, n }),
           displayText: `選擇 ${c.room} ${c.doctor}`,
         },
@@ -295,14 +295,15 @@ async function addTracking(ctx, { hosp, ampm, sid, number, label = null }) {
 
   const res = await ctx.env.DB.prepare(
     `INSERT INTO trackings (chat_id, url, my_number, label, hosp, ampm, service_id, doctor, room,
-       last_number, sent, fail_count, fail_alerted, drop_alerted, created_at, next_check_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
+       last_number, sent, by_checkin, fail_count, fail_alerted, drop_alerted, created_at, next_check_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
   ).bind(ctx.chatId, detailUrl(baseUrl(ctx.env), hosp, sid), number, label, hosp, ampm, sid, c.doctor, c.room,
-    c.number, sent, ctx.now, ctx.now + 55_000).run();
+    c.number, sent, c.byCheckin ? 1 : 0, ctx.now, ctx.now + 55_000).run();
   const row = { id: res.meta.last_row_id, doctor: c.doctor, room: c.room, hosp, ampm, label };
 
   const lines = [`✅ 已加入追蹤 ${title(row)}`, `你的號碼：${number}`];
   lines.push(c.number === null ? "目前尚未開始看診，開始後會通知" : `目前燈號：${c.number}（還有 ${number - c.number} 號）`);
+  if (c.byCheckin) lines.push("", `ℹ️ ${CHECKIN_NOTE}`);
   return lines.join("\n");
 }
 
@@ -323,7 +324,7 @@ async function listReply(ctx) {
   const lines = [`📋 追蹤中 ${rows.length} 筆`];
   for (const r of rows) {
     const s = r.last_number === null ? "尚未開始看診" : `目前 ${r.last_number} 號，剩 ${Math.max(r.my_number - r.last_number, 0)} 號`;
-    const warn = r.fail_alerted ? "（⚠️ 讀取異常）" : "";
+    const warn = (r.by_checkin ? "（依報到順序）" : "") + (r.fail_alerted ? "（⚠️ 讀取異常）" : "");
     lines.push("", title(r), `  你是 ${r.my_number} 號｜${s}${warn}｜${fmtTime(r.created_at)} 加入`);
   }
   const quick = rows.map((r) => quickText(`取消 #${r.id}`, `取消 ${r.id}`));
@@ -381,7 +382,7 @@ async function checkOne(row, cfg, ctx) {
   try {
     const table = await getTable(ctx, row.hosp, row.ampm);
     const c = table.clinics.find((x) => x.sid === row.service_id);
-    result = c ? onReading(row, c.number, cfg, ctx.now) : onFailure(row, cfg, ctx.now, "列表中找不到這一診");
+    result = c ? onReading(row, c.number, cfg, ctx.now, c.byCheckin) : onFailure(row, cfg, ctx.now, "列表中找不到這一診");
   } catch (e) {
     result = onFailure(row, cfg, ctx.now, e.message);
   }

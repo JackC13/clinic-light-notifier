@@ -20,9 +20,10 @@ test("ntuh: 解析真實列表", () => {
   assert.equal(updatedAt, "2026-09-30 13:50:51");
   assert.equal(clinics.length, 5);
   assert.deepEqual(clinics[0], {
-    sid: "8052029", hosp: "CH", room: "01診", doctor: "何冠頤", type: "普通門診", number: 4, note: "",
+    sid: "8052029", hosp: "CH", room: "01診", doctor: "何冠頤", type: "普通門診", number: 4, note: "", byCheckin: false,
   });
   assert.equal(clinics[1].note, "依報到順序看診");
+  assert.equal(clinics[1].byCheckin, true);
   assert.equal(clinics[2].doctor, "總醫師(代)");
   assert.equal(clinics[3].number, null); // 全形空白 = 尚未開始
   assert.equal(clinics[4].number, 25);   // 沒補零的號碼
@@ -108,4 +109,21 @@ test("monitor: 開始看診後號碼消失視為失敗", () => {
 test("monitor: 逾時", () => {
   assert.equal(isExpired(row({ created_at: NOW - 9 * 3600e3 }), cfg, NOW), true);
   assert.equal(isExpired(row(), cfg, NOW), false);
+});
+
+// ── 依報到順序看診 ──
+test("checkin: 看診途中改為依報到順序 → 提醒一次", () => {
+  const r = onReading(row({ last_number: 5 }), 6, cfg, NOW, true);
+  assert.equal(r.update.by_checkin, 1);
+  assert.match(r.messages[0], /依報到順序/);
+  assert.equal(onReading(row({ last_number: 6, by_checkin: 1 }), 7, cfg, NOW, true).messages.length, 0);
+});
+test("checkin: 燈號變小不警告", () => {
+  assert.deepEqual(onReading(row({ last_number: 20, by_checkin: 1, sent: "10,5,2" }), 12, cfg, NOW, true).messages, []);
+});
+test("checkin: 超過號碼時提醒確認報到，不說過號", () => {
+  const r = onReading(row({ last_number: 24, by_checkin: 1, sent: "10,5,2" }), 27, cfg, NOW, true);
+  assert.equal(r.done, true);
+  assert.match(r.messages[0], /不一定是過號/);
+  assert.doesNotMatch(r.messages[0], /立刻到診間/);
 });

@@ -76,6 +76,7 @@ export function parseTable(html) {
       type: pick("clinic-type"),
       number: digits ? parseInt(digits, 10) : null, // null = 尚未開始看診
       note: pick("according-to-order"),
+      byCheckin: /報到順序/.test(pick("according-to-order")), // 依報到順序看診：燈號不照號碼順序
     });
   }
   return { updatedAt, clinics };

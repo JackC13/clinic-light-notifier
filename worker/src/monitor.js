@@ -42,16 +42,25 @@ function parseSent(s) {
   return new Set(String(s ?? "").split(",").filter(Boolean).map(Number));
 }
 
+export const CHECKIN_NOTE = "此診依報到順序看診，燈號不一定照號碼順序，通知僅供參考，請記得先報到";
+
 /**
  * 讀到該診資料後呼叫。
  * current: 目前燈號；null 表示尚未開始看診
+ * byCheckin: 該診目前是否標示「依報到順序看診」
  * 回傳 { update, messages, done }
  */
-export function onReading(row, current, cfg, now) {
+export function onReading(row, current, cfg, now, byCheckin = !!row.by_checkin) {
   const messages = [];
   const update = {};
   const t = title(row);
   const my = row.my_number;
+
+  // 看診途中才改成依報到順序：提醒一次
+  if (byCheckin !== !!row.by_checkin) {
+    update.by_checkin = byCheckin ? 1 : 0;
+    if (byCheckin) messages.push(`ℹ️ ${t}｜${CHECKIN_NOTE}`);
+  }
 
   // 還沒開始看診（從沒讀到過號碼）→ 安靜等待
   if (current === null && row.last_number === null) {
@@ -60,13 +69,17 @@ export function onReading(row, current, cfg, now) {
     return { update, messages, done: false };
   }
   // 讀到過號碼卻突然沒了 → 視同失敗
-  if (current === null) return onFailure(row, cfg, now, "燈號消失了");
+  if (current === null) {
+    const f = onFailure(row, cfg, now, "燈號消失了");
+    return { ...f, update: { ...update, ...f.update }, messages: [...messages, ...f.messages] };
+  }
 
   if (row.fail_alerted) messages.push(`✅ ${t}｜恢復讀取，目前 ${current} 號`);
   update.fail_count = 0;
   update.fail_alerted = 0;
 
-  if (row.last_number !== null && current < row.last_number && !row.drop_alerted) {
+  // 依報到順序看診時燈號本來就會前後跳，不警告
+  if (!byCheckin && row.last_number !== null && current < row.last_number && !row.drop_alerted) {
     messages.push(`⚠️ ${t}｜燈號從 ${row.last_number} 變成 ${current}（變小了），請確認是否為今天這一診`);
     update.drop_alerted = 1;
   }
@@ -74,11 +87,19 @@ export function onReading(row, current, cfg, now) {
 
   const remaining = my - current;
   if (remaining <= 0) {
-    messages.push(
-      remaining === 0
-        ? `🔔 ${t}｜輪到了！目前 ${current} 號`
-        : `🚨 ${t}｜燈號 ${current} 已超過 ${my} 號，請立刻到診間報到`,
-    );
+    if (byCheckin) {
+      messages.push(
+        remaining === 0
+          ? `🔔 ${t}｜燈號到 ${current} 號了（此診依報到順序看診，請以現場叫號為準）`
+          : `🚨 ${t}｜燈號 ${current} 已超過你的 ${my} 號。此診依報到順序看診，不一定是過號：請確認是否已報到，或詢問護理站`,
+      );
+    } else {
+      messages.push(
+        remaining === 0
+          ? `🔔 ${t}｜輪到了！目前 ${current} 號`
+          : `🚨 ${t}｜燈號 ${current} 已超過 ${my} 號，請立刻到診間報到`,
+      );
+    }
     return { update, messages, done: true };
   }
 
