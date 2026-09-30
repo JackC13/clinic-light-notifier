@@ -1,0 +1,26 @@
+name = "clinic-light-bot"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# 每分鐘檢查一次到期的追蹤
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "clinic-light"
+database_id = "REPLACE_WITH_YOUR_DATABASE_ID"   # wrangler d1 create 之後貼上
+
+[vars]
+# 允許下指令的聊天室（群組 C… / 個人 U…），逗號分隔
+ALLOWED_CHAT_IDS = "C1e23fee597d0a7a4bc4d0a514ddfa46f,U6bd4189c693945ecf81247047cfcf17f"
+# 只允許追蹤這些網站的網址
+ALLOWED_HOSTS = "reg.ntuh.gov.tw"
+# 剩幾號時通知
+THRESHOLDS = "10,5,2"
+# 最長追蹤時數，逾時自動移除
+MAX_HOURS = "8"
+
+# 機密用 wrangler secret put 設定，不要寫在這裡：
+#   LINE_CHANNEL_ACCESS_TOKEN
+#   LINE_CHANNEL_SECRET
