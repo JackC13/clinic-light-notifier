@@ -118,6 +118,22 @@ function getDetail(ctx, hosp, sid) {
   return ctx.tables.get(key);
 }
 
+/** 找某一診：先查院區列表；列表查不到（例如查詢頁暫時 520）時改用不需要 token 的個別燈號頁 */
+async function findClinic(ctx, hosp, ampm, sid) {
+  try {
+    const table = await getTable(ctx, hosp, ampm);
+    return table.clinics.find((x) => x.sid === sid) ?? null;
+  } catch (e) {
+    const d = await getDetail(ctx, hosp, sid).catch(() => null);
+    if (!d) throw e;
+    console.warn(`列表失敗（${e.message}），改用燈號頁`);
+    return {
+      sid, hosp, number: d.current, note: "", byCheckin: false, fromDetail: true,
+      room: d.room.replace(/^\S+\s+/, "").replace(/\s+/g, ""), doctor: d.doctor || "（醫師）",
+    };
+  }
+}
+
 /** 加入追蹤時，從燈號頁判斷你目前的報到狀態 */
 function initialCheckin(d, my) {
   const me = d?.statuses.find((s) => s.n === my);
@@ -274,8 +290,7 @@ async function onPostback(d, ctx) {
   if (d.a === "p") return guide({ hosp: d.h, ampm: d.p, number: d.n }, ctx);
   if (d.a === "s") {
     if (d.n) return addTracking(ctx, { hosp: d.h, ampm: d.p, sid: d.s, number: d.n });
-    const table = await getTable(ctx, d.h, d.p);
-    const c = table.clinics.find((x) => x.sid === d.s);
+    const c = await findClinic(ctx, d.h, d.p, d.s);
     if (!c) return "❌ 今天的列表中找不到這一診";
     return askNumber(ctx, { ...c, hosp: d.h, ampm: d.p }, null);
   }
@@ -300,8 +315,7 @@ async function answerNumber(number, ctx) {
 }
 
 async function addTracking(ctx, { hosp, ampm, sid, number, label = null }) {
-  const table = await getTable(ctx, hosp, ampm);
-  const c = table.clinics.find((x) => x.sid === sid);
+  const c = await findClinic(ctx, hosp, ampm, sid);
   if (!c) return "❌ 今天的列表中找不到這一診";
   const clinic = { ...c, hosp, ampm };
 
@@ -464,8 +478,8 @@ async function checkOne(row, cfg, ctx) {
 
   let result;
   try {
-    const table = await getTable(ctx, row.hosp, row.ampm);
-    const c = table.clinics.find((x) => x.sid === row.service_id);
+    const c = await findClinic(ctx, row.hosp, row.ampm, row.service_id);
+    if (c?.fromDetail) c.byCheckin = !!row.by_checkin; // 燈號頁沒有這個標示：沿用上次列表的判斷
     result = c ? await evaluate(row, c, cfg, ctx) : onFailure(row, cfg, ctx.now, "列表中找不到這一診");
   } catch (e) {
     result = onFailure(row, cfg, ctx.now, e.message);

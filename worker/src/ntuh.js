@@ -120,6 +120,7 @@ export function parseDetail(html) {
   return {
     updatedAt: html.match(/最後更新時間[:：]\s*([\d\-: ]+)/)?.[1]?.trim() ?? null,
     room: strip(section("room-number", "doc-name").replace(/^[^>]*>/, "").split("</div>")[0] ?? ""),
+    doctor: strip(section("doc-name", "now-number").replace(/^[^>]*>/, "").split("</div>")[0] ?? ""),
     current: numberIn(nowBlock),
     maxCalled: numberIn(section("biggest-number", "next-number")),
     expected,
@@ -131,7 +132,7 @@ export function parseDetail(html) {
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
-const SESSION_TTL = 15 * 60_000;
+const SESSION_TTL = 20 * 60_000;
 let session = null; // 同一個 isolate 內重複使用
 
 export const baseUrl = (env) => (env.NTUH_BASE || "https://reg.ntuh.gov.tw").replace(/\/$/, "");
@@ -141,6 +142,24 @@ function setCookies(res) {
   if (typeof res.headers.getAll === "function") return res.headers.getAll("Set-Cookie");
   const one = res.headers.get("Set-Cookie");
   return one ? [one] : [];
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 5xx 或連線失敗時重試（醫院網站偶爾回 520），最多 3 次 */
+async function withRetry(fn, trace = null) {
+  const delays = [1000, 2000];
+  for (let i = 0; ; i++) {
+    try {
+      const res = await fn();
+      if (res.status < 500 || i >= delays.length) return res;
+      trace?.push(`↻ HTTP ${res.status}，${delays[i] / 1000} 秒後重試`);
+    } catch (e) {
+      if (i >= delays.length) throw e;
+      trace?.push(`↻ ${e.message}，${delays[i] / 1000} 秒後重試`);
+    }
+    await sleep(delays[i]);
+  }
 }
 
 /** 簡易 cookie jar：手動跟隨轉址，保留每一站設定的 cookie（瀏覽器的行為） */
@@ -181,19 +200,51 @@ let sessionPromise = null; // 同時多個查詢時共用同一次 token 請求
 function getSession(env, force = false) {
   if (!force && session && Date.now() - session.at < SESSION_TTL) return Promise.resolve(session);
   if (!sessionPromise) {
-    sessionPromise = loadSession(env).finally(() => {
+    sessionPromise = (async () => {
+      if (!force) {
+        const saved = await loadSavedSession(env);
+        if (saved) return (session = saved);
+      }
+      const s = await loadSession(env);
+      await saveSession(env, s);
+      return s;
+    })().finally(() => {
       sessionPromise = null;
     });
   }
   return sessionPromise;
 }
 
+const KV_KEY = "ntuh_session";
+
+async function loadSavedSession(env) {
+  if (!env.DB) return null;
+  try {
+    const row = await env.DB.prepare("SELECT value, updated_at FROM kv WHERE key = ?").bind(KV_KEY).first();
+    if (!row || Date.now() - row.updated_at > SESSION_TTL) return null;
+    const v = JSON.parse(row.value);
+    return { token: v.token, jar: new Map(v.jar), at: row.updated_at };
+  } catch {
+    return null; // 還沒建 kv 表等情況：當作沒有
+  }
+}
+
+async function saveSession(env, s) {
+  if (!env.DB) return;
+  try {
+    await env.DB.prepare("INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)")
+      .bind(KV_KEY, JSON.stringify({ token: s.token, jar: [...s.jar] }), s.at).run();
+  } catch (e) {
+    console.warn("儲存 token 失敗", e.message);
+  }
+}
+
 async function loadSession(env, trace = null) {
   const jar = new Map();
-  const res = await jarFetch(jar, `${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=T0`, {
-    headers: { "User-Agent": UA, "Accept-Language": "zh-TW,zh;q=0.9", Accept: "text/html,application/xhtml+xml" },
-  }, trace);
-  if (!res.ok) throw new Error(`取得查詢頁失敗 HTTP ${res.status}`);
+  const res = await withRetry(() => jarFetch(jar, `${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=T0`, {
+    headers: { "User-Agent": UA, "Accept-Language": "zh-TW,zh;q=0.9" },
+  }, trace), trace);
+  if (!res.ok) throw new Error(`臺大查詢頁暫時沒有回應（HTTP ${res.status}），請稍後再試`);
   const html = await res.text();
   const input = html.match(/<input[^>]*name="__RequestVerificationToken"[^>]*>/)?.[0];
   const token = input?.match(/value="([^"]*)"/)?.[1];
@@ -211,7 +262,7 @@ async function postTable(env, s, hosp, ampm, trace = null) {
     RegionCode: "",
     AmpmCode: String(ampm),
   });
-  return jarFetch(s.jar, `${baseUrl(env)}/WebReg/WebReg/DeptLightTable`, {
+  return withRetry(() => jarFetch(s.jar, `${baseUrl(env)}/WebReg/WebReg/DeptLightTable`, {
     method: "POST",
     headers: {
       "User-Agent": UA,
@@ -223,7 +274,7 @@ async function postTable(env, s, hosp, ampm, trace = null) {
       Referer: `${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=${hosp}`,
     },
     body,
-  }, trace);
+  }, trace), trace);
 }
 
 /** 取得某院區某時段的所有診；失敗會丟出例外 */
@@ -233,7 +284,7 @@ export async function fetchTable(env, hosp, ampm) {
     const res = await postTable(env, s, hosp, ampm);
     if (res.ok) return parseTable(await res.text());
     // token 過期時醫院回 404/400：重新取 token 再試一次
-    if (attempt === 0 && [400, 403, 404].includes(res.status)) continue;
+    if (attempt === 0 && [400, 403, 404].includes(res.status)) continue; // getSession(force) 會重取並存回
     const snippet = strip(await res.text()).slice(0, 120);
     console.error(`DeptLightTable ${hosp}/${ampm} HTTP ${res.status}: ${snippet}`);
     throw new Error(`HTTP ${res.status}`);
@@ -267,14 +318,14 @@ export async function diagnose(env, hosp, ampm) {
 
 /** 取得個別診的燈號頁（不需要 token）；失敗會丟出例外 */
 export async function fetchDetail(env, hosp, sid) {
-  const res = await fetch(detailUrl(baseUrl(env), hosp, sid), {
+  const res = await withRetry(() => fetch(detailUrl(baseUrl(env), hosp, sid), {
     headers: {
       "User-Agent": UA,
       "Accept-Language": "zh-TW,zh;q=0.9",
       ...(session?.jar?.size ? { Cookie: [...session.jar].map(([k, v]) => `${k}=${v}`).join("; ") } : {}),
     },
     signal: AbortSignal.timeout(15_000),
-  });
+  }));
   if (!res.ok) throw new Error(`燈號頁 HTTP ${res.status}`);
   return parseDetail(await res.text());
 }
