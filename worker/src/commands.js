@@ -68,6 +68,11 @@ export function parseCommand(raw) {
 
   if (["說明", "help", "指令", "用法"].includes(key) && tokens.length === 0) return { cmd: "help" };
 
+  if (["診斷", "debug"].includes(key)) {
+    const terms = parseTerms(tokens);
+    return { cmd: "diagnose", hosp: terms.hosp, ampm: terms.ampm };
+  }
+
   return null;
 }
 

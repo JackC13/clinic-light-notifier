@@ -5,7 +5,7 @@
 import { parseCommand, HELP } from "./commands.js";
 import { verifySignature, reply, push, textMsg, quickPostback, quickText } from "./line.js";
 import {
-  HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, parseDetailUrl, detailUrl, baseUrl,
+  HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
 import { loadConfig, onReading, onFailure, onDetail, isExpired, title, CHECKIN_NOTE } from "./monitor.js";
 
@@ -92,6 +92,12 @@ async function runCommand(cmd, ctx) {
     case "addUrl": return addByUrl(cmd, ctx);
     case "number": return answerNumber(cmd.number, ctx);
     case "postback": return onPostback(cmd.data, ctx);
+    case "diagnose": {
+      const hosp = cmd.hosp ?? "CH";
+      const ampm = cmd.ampm ?? currentAmpm(ctx.now);
+      const trace = await diagnose(ctx.env, hosp, ampm);
+      return [`🩺 診斷：${hospitalName(hosp)} ${AMPM[ampm]}`, "", ...trace.map((l) => `・${l}`)].join("\n");
+    }
   }
   return null;
 }

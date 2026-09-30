@@ -136,14 +136,44 @@ let session = null; // 同一個 isolate 內重複使用
 
 export const baseUrl = (env) => (env.NTUH_BASE || "https://reg.ntuh.gov.tw").replace(/\/$/, "");
 
-function cookiesFrom(res) {
-  const list =
-    typeof res.headers.getSetCookie === "function"
-      ? res.headers.getSetCookie()
-      : typeof res.headers.getAll === "function"
-        ? res.headers.getAll("Set-Cookie")
-        : [res.headers.get("Set-Cookie")].filter(Boolean);
-  return list.map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
+function setCookies(res) {
+  if (typeof res.headers.getSetCookie === "function") return res.headers.getSetCookie();
+  if (typeof res.headers.getAll === "function") return res.headers.getAll("Set-Cookie");
+  const one = res.headers.get("Set-Cookie");
+  return one ? [one] : [];
+}
+
+/** 簡易 cookie jar：手動跟隨轉址，保留每一站設定的 cookie（瀏覽器的行為） */
+async function jarFetch(jar, url, init = {}, trace = null) {
+  let current = url;
+  let opts = { ...init };
+  for (let hop = 0; hop < 6; hop++) {
+    const cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+    const res = await fetch(current, {
+      ...opts,
+      redirect: "manual",
+      headers: { ...(opts.headers ?? {}), ...(cookie ? { Cookie: cookie } : {}) },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const names = [];
+    for (const c of setCookies(res)) {
+      const [pair] = c.split(";");
+      const i = pair.indexOf("=");
+      if (i > 0) {
+        jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+        names.push(pair.slice(0, i).trim());
+      }
+    }
+    const loc = res.headers.get("Location");
+    trace?.push(`${opts.method ?? "GET"} ${new URL(current).pathname} → ${res.status}${loc ? ` ⇒ ${loc}` : ""}${names.length ? `｜cookie: ${names.join(", ")}` : ""}`);
+    if (res.status >= 300 && res.status < 400 && loc) {
+      current = new URL(loc, current).toString();
+      if (res.status !== 307 && res.status !== 308) opts = { ...opts, method: "GET", body: undefined };
+      continue;
+    }
+    return res;
+  }
+  throw new Error("轉址次數過多");
 }
 
 let sessionPromise = null; // 同時多個查詢時共用同一次 token 請求
@@ -158,48 +188,81 @@ function getSession(env, force = false) {
   return sessionPromise;
 }
 
-async function loadSession(env) {
-  const res = await fetch(`${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=T0`, {
-    headers: { "User-Agent": UA, "Accept-Language": "zh-TW,zh;q=0.9" },
-    signal: AbortSignal.timeout(15_000),
-  });
+async function loadSession(env, trace = null) {
+  const jar = new Map();
+  const res = await jarFetch(jar, `${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=T0`, {
+    headers: { "User-Agent": UA, "Accept-Language": "zh-TW,zh;q=0.9", Accept: "text/html,application/xhtml+xml" },
+  }, trace);
   if (!res.ok) throw new Error(`取得查詢頁失敗 HTTP ${res.status}`);
   const html = await res.text();
   const input = html.match(/<input[^>]*name="__RequestVerificationToken"[^>]*>/)?.[0];
   const token = input?.match(/value="([^"]*)"/)?.[1];
+  trace?.push(`查詢頁 ${html.length} 字元｜token ${token ? `${token.length} 字元` : "找不到"}`);
   if (!token) throw new Error("查詢頁找不到驗證 token");
-  session = { token, cookie: cookiesFrom(res), at: Date.now() };
+  session = { token, jar, at: Date.now() };
   return session;
+}
+
+async function postTable(env, s, hosp, ampm, trace = null) {
+  const body = new URLSearchParams({
+    __RequestVerificationToken: s.token,
+    vHospitalCode: hosp,
+    DeptCode: "",
+    RegionCode: "",
+    AmpmCode: String(ampm),
+  });
+  return jarFetch(s.jar, `${baseUrl(env)}/WebReg/WebReg/DeptLightTable`, {
+    method: "POST",
+    headers: {
+      "User-Agent": UA,
+      "Accept-Language": "zh-TW,zh;q=0.9",
+      Accept: "*/*",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest",
+      Origin: baseUrl(env),
+      Referer: `${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=${hosp}`,
+    },
+    body,
+  }, trace);
 }
 
 /** 取得某院區某時段的所有診；失敗會丟出例外 */
 export async function fetchTable(env, hosp, ampm) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const s = await getSession(env, attempt > 0);
-    const body = new URLSearchParams({
-      __RequestVerificationToken: s.token,
-      vHospitalCode: hosp,
-      DeptCode: "",
-      RegionCode: "",
-      AmpmCode: String(ampm),
-    });
-    const res = await fetch(`${baseUrl(env)}/WebReg/WebReg/DeptLightTable`, {
-      method: "POST",
-      headers: {
-        "User-Agent": UA,
-        "Accept-Language": "zh-TW,zh;q=0.9",
-        "Content-Type": "application/x-www-form-urlencoded",
-        Referer: `${baseUrl(env)}/WebReg/WebReg/ClinicCurrentLightNo?vHospCode=${hosp}`,
-        ...(s.cookie ? { Cookie: s.cookie } : {}),
-      },
-      body,
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await postTable(env, s, hosp, ampm);
     if (res.ok) return parseTable(await res.text());
     // token 過期時醫院回 404/400：重新取 token 再試一次
     if (attempt === 0 && [400, 403, 404].includes(res.status)) continue;
+    const snippet = strip(await res.text()).slice(0, 120);
+    console.error(`DeptLightTable ${hosp}/${ampm} HTTP ${res.status}: ${snippet}`);
     throw new Error(`HTTP ${res.status}`);
   }
+}
+
+/** 診斷：一步一步記錄與醫院的往來 */
+export async function diagnose(env, hosp, ampm) {
+  const trace = [];
+  try {
+    const s = await loadSession(env, trace);
+    trace.push(`cookie jar：${[...s.jar.keys()].join(", ") || "（空）"}`);
+    const res = await postTable(env, s, hosp, ampm, trace);
+    const html = await res.text();
+    if (!res.ok) {
+      trace.push(`列表回應：${strip(html).slice(0, 150) || "（空）"}`);
+      return trace;
+    }
+    const t = parseTable(html);
+    trace.push(`列表：${t.clinics.length} 診｜更新 ${t.updatedAt ?? "?"}`);
+    const c = t.clinics.find((x) => x.number !== null) ?? t.clinics[0];
+    if (c) {
+      const d = await fetchDetail(env, hosp, c.sid);
+      trace.push(`燈號頁 ${c.room} ${c.doctor}：燈號 ${d.current ?? "－"}｜最大號 ${d.maxCalled ?? "－"}｜清單 ${d.statuses.length} 個號碼`);
+    }
+  } catch (e) {
+    trace.push(`❌ ${e.message}`);
+  }
+  return trace;
 }
 
 /** 取得個別診的燈號頁（不需要 token）；失敗會丟出例外 */
@@ -208,7 +271,7 @@ export async function fetchDetail(env, hosp, sid) {
     headers: {
       "User-Agent": UA,
       "Accept-Language": "zh-TW,zh;q=0.9",
-      ...(session?.cookie ? { Cookie: session.cookie } : {}),
+      ...(session?.jar?.size ? { Cookie: [...session.jar].map(([k, v]) => `${k}=${v}`).join("; ") } : {}),
     },
     signal: AbortSignal.timeout(15_000),
   });
