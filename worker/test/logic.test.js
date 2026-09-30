@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseTable, parseDetailUrl, currentAmpm, hospitalByAlias } from "../src/ntuh.js";
+import { parseTable, parseDetail, parseDetailUrl, currentAmpm, hospitalByAlias } from "../src/ntuh.js";
 import { parseCommand } from "../src/commands.js";
-import { loadConfig, onReading, onFailure, isExpired, title } from "../src/monitor.js";
+import { loadConfig, onReading, onFailure, onDetail, isExpired, title } from "../src/monitor.js";
 
 const cfg = loadConfig({});
 const NOW = 1_800_000_000_000;
@@ -126,4 +126,74 @@ test("checkin: 超過號碼時提醒確認報到，不說過號", () => {
   assert.equal(r.done, true);
   assert.match(r.messages[0], /不一定是過號/);
   assert.doesNotMatch(r.messages[0], /立刻到診間/);
+});
+
+// ── 個別燈號頁（真實頁面）與報到順序 ──
+const realDetail = () => parseDetail(readFileSync(new URL("./fixtures/clinic-detail.html", import.meta.url), "utf8"));
+
+test("detail: 解析真實燈號頁", () => {
+  const d = realDetail();
+  assert.equal(d.room, "兒童醫院 05診");
+  assert.equal(d.current, 2);
+  assert.equal(d.maxCalled, 3);
+  assert.deepEqual(d.expected, [{ n: 2, type: "順號" }, { n: 3, type: "順號" }, { n: 79, type: "敬老號" }]);
+  assert.equal(d.statuses.length, 57);
+  assert.deepEqual(d.statuses.slice(0, 3), [{ n: 2, status: "oncall" }, { n: 3, status: "checkin" }, { n: 4, status: "notin" }]);
+  assert.equal(d.statuses.find((s) => s.n === 33).status, "first");
+});
+
+// 小型頁面產生器：statuses 形如 { 2: "oncall", 3: "checkin", 13: "notin" }
+const page = (statuses, { current = 2, maxCalled = 3, expected = [] } = {}) => ({
+  current, maxCalled, expected: expected.map((n) => ({ n, type: "順號" })),
+  statuses: Object.entries(statuses).map(([n, status]) => ({ n: +n, status })),
+});
+const ck = (o = {}) => row({ my_number: 13, by_checkin: 1, alerts: "", checkin_state: null, ahead: null, ...o });
+
+test("checkin: 未報到 → 開診後提醒報到一次", () => {
+  let r = onDetail(ck(), page({ 2: "oncall", 3: "checkin", 13: "notin" }), true, cfg, NOW);
+  assert.equal(r.handled, true);
+  assert.equal(r.update.checkin_state, "no");
+  assert.match(r.messages[0], /還沒報到/);
+  r = onDetail(ck({ checkin_state: "no", alerts: "R" }), page({ 2: "oncall", 13: "notin" }), true, cfg, NOW);
+  assert.deepEqual(r.messages, []);
+});
+test("checkin: 報到那一刻記下前面的人；之後報到的不算", () => {
+  // 報到時：2 看診中、3/5/7 已報到、4 未報到 → 前面 4 位
+  let r = onDetail(ck({ checkin_state: "no", alerts: "R" }),
+    page({ 2: "oncall", 3: "checkin", 4: "notin", 5: "checkin", 7: "checkin", 13: "checkin" }), true, cfg, NOW);
+  assert.equal(r.update.checkin_state, "yes");
+  assert.deepEqual(JSON.parse(r.update.ahead), [2, 3, 5, 7]);
+  assert.match(r.messages[0], /已報到，前面還有 4 位/);
+  assert.equal(r.update.sent, "10,5");  // 剛通知過 4 位，不再推「剩 5」
+
+  // 之後：2、3 看完離開；4 和 20 後來才報到（排在你後面）
+  const after = ck({ checkin_state: "yes", ahead: "[2,3,5,7]", sent: "10,5", alerts: "R" });
+  r = onDetail(after, page({ 4: "checkin", 5: "oncall", 7: "checkin", 13: "checkin", 20: "checkin" }, { current: 5 }), true, cfg, NOW);
+  assert.equal(r.update.ahead_left, 2);
+  assert.match(r.messages[0], /🔴.*前面還有 2 位/);
+});
+test("checkin: 出現在預計叫號、輪到看診、看完離開", () => {
+  const base = ck({ checkin_state: "yes", ahead: "[7]", sent: "10,5,2", alerts: "R" });
+  let r = onDetail(base, page({ 7: "oncall", 13: "checkin" }, { expected: [7, 13] }), true, cfg, NOW);
+  assert.match(r.messages[0], /預計叫號」第 2 位/);
+  r = onDetail(base, page({ 13: "oncall" }), true, cfg, NOW);
+  assert.equal(r.done, true);
+  assert.match(r.messages[0], /輪到了/);
+  r = onDetail(base, page({ 20: "checkin" }), true, cfg, NOW);
+  assert.equal(r.done, true);
+  assert.match(r.messages[0], /已不在候診清單/);
+});
+test("checkin: 加入前就已報到 → 標示「最多」", () => {
+  const r = onDetail(ck(), page({ 2: "oncall", 3: "checkin", 13: "checkin" }), true, cfg, NOW);
+  assert.equal(r.update.checkin_state, "approx");
+  assert.match(r.messages[0], /最多 2 位/);
+});
+test("detail: 未報到且已叫最大號超過 → 過號提醒（一般診也適用）", () => {
+  const r = onDetail(row({ my_number: 4, alerts: "" }), page({ 4: "notin", 6: "oncall" }, { current: 6, maxCalled: 6 }), false, cfg, NOW);
+  assert.equal(r.handled, false);
+  assert.match(r.messages[0], /已過號，請盡速插卡報到/);
+});
+test("detail: 一般診快輪到時提醒報到", () => {
+  const r = onDetail(row({ my_number: 12, alerts: "" }), page({ 5: "oncall", 12: "notin" }, { current: 5, maxCalled: 5 }), false, cfg, NOW);
+  assert.match(r.messages[0], /快輪到了.*還沒報到/);
 });

@@ -136,6 +136,117 @@ export function onFailure(row, cfg, now, reason) {
   return { update, messages, done: false };
 }
 
+// ───────────── 個別診燈號頁（報到狀態、預計叫號） ─────────────
+//
+// 新欄位：checkin_state  null=還沒看過 / 'no'=看到未報到 / 'yes'=看到報到的那一刻 / 'approx'=第一次看到就已報到
+//         ahead          報到那一刻排在前面的號碼（JSON 陣列）
+//         ahead_left     前面還剩幾位（列表顯示用）
+//         alerts         已發過的一次性提醒：P 過號、E 預計叫號、R 提醒報到
+
+const ACTIVE = new Set(["checkin", "oncall"]);
+const keys = (s) => new Set(String(s ?? "").split(",").filter(Boolean));
+
+/**
+ * 讀到個別燈號頁後呼叫（通常接在 onReading 之後，或取代 onReading）。
+ * byCheckin=true 時改用「報到順序」計算前面還有幾位，回傳 handled=true；
+ * 否則只補上一次性提醒（過號、預計叫號、提醒報到）。
+ */
+export function onDetail(row, d, byCheckin, cfg, now) {
+  const t = title(row);
+  const my = row.my_number;
+  const messages = [];
+  const update = {};
+  const alerts = keys(row.alerts);
+  const me = d.statuses.find((s) => s.n === my);
+  const notIn = me && (me.status === "notin" || me.status === "first");
+  const started = d.current !== null || d.statuses.some((s) => s.status === "oncall");
+
+  if (notIn && row.checkin_state !== "no") update.checkin_state = "no";
+
+  // 一次性提醒
+  if (notIn && d.maxCalled !== null && d.maxCalled > my && !alerts.has("P")) {
+    alerts.add("P");
+    messages.push(`⚠️ ${t}｜已叫最大號 ${d.maxCalled} 超過你的 ${my} 號，你還沒報到：已過號，請盡速插卡報到`);
+  }
+  const idx = d.expected.findIndex((e) => e.n === my);
+  if (idx >= 0 && me?.status !== "oncall" && !alerts.has("E")) {
+    alerts.add("E");
+    messages.push(`🔔 ${t}｜你在「預計叫號」第 ${idx + 1} 位，請到診間外準備`);
+  }
+  const nearByNumber = d.current !== null && my - d.current <= cfg.nearWithin;
+  if (notIn && !alerts.has("R") && !alerts.has("P") && (byCheckin ? started : nearByNumber)) {
+    alerts.add("R");
+    messages.push(
+      byCheckin
+        ? `📝 ${t}｜已開始看診，你還沒報到。此診依報到順序，越早報到越早看`
+        : `📝 ${t}｜快輪到了（目前 ${d.current} 號），你還沒報到，請先報到`,
+    );
+  }
+  if (alerts.size !== keys(row.alerts).size) update.alerts = [...alerts].join(",");
+
+  if (!byCheckin) return { update, messages, done: false, handled: false };
+
+  // ── 依報到順序：看誰比你先報到 ──
+  if (d.current !== null) update.last_number = d.current;
+  const next = (min) => (update.next_check_at = now + min * 60_000 - 5_000);
+
+  if (me?.status === "oncall") {
+    messages.push(`🔔 ${t}｜輪到了！你的 ${my} 號看診中`);
+    return { update, messages, done: true, handled: true };
+  }
+  const checkedBefore = row.checkin_state === "yes" || row.checkin_state === "approx";
+  if (!me) {
+    if (checkedBefore) {
+      messages.push(`✅ ${t}｜你的 ${my} 號已不在候診清單，應已看診完畢`);
+      return { update, messages, done: true, handled: true };
+    }
+    if (!started || d.statuses.length === 0) {
+      next(cfg.farMinutes);
+      return { update, messages, done: false, handled: true };
+    }
+    return { handled: false, update, messages, done: false }; // 清單裡找不到：交給號碼邏輯
+  }
+
+  let ahead = row.ahead ? JSON.parse(row.ahead) : null;
+  let state = row.checkin_state;
+  if (me.status === "checkin" && !checkedBefore) {
+    // 報到的這一刻：已報到 / 看診中的其他人都排在你前面
+    ahead = d.statuses.filter((s) => s.n !== my && ACTIVE.has(s.status)).map((s) => s.n);
+    state = row.checkin_state === "no" ? "yes" : "approx";
+    update.checkin_state = state;
+    update.ahead = JSON.stringify(ahead);
+  }
+
+  if (state === "yes" || state === "approx") {
+    const present = new Set(d.statuses.filter((s) => ACTIVE.has(s.status)).map((s) => s.n));
+    const left = ahead.filter((n) => present.has(n)).length;
+    update.ahead_left = left;
+    const most = state === "approx" ? "最多 " : "";
+    const sent = new Set(String(row.sent ?? "").split(",").filter(Boolean).map(Number));
+
+    if (!checkedBefore) {
+      messages.push(
+        state === "yes"
+          ? `✅ ${t}｜已報到，前面還有 ${left} 位（依報到順序）`
+          : `✅ ${t}｜已報到，前面${most}${left} 位（加入追蹤前就已報到，無法確定先後）`,
+      );
+      cfg.thresholds.filter((th) => left <= th).forEach((th) => sent.add(th)); // 剛通知過，不重複
+    } else {
+      const crossed = cfg.thresholds.filter((th) => left <= th && !sent.has(th));
+      if (crossed.length) {
+        crossed.forEach((th) => sent.add(th));
+        const emoji = left <= 2 ? "🔴" : left <= 5 ? "🟠" : "🟡";
+        messages.push(`${emoji} ${t}｜前面還有 ${most}${left} 位（依報到順序）`);
+      }
+    }
+    update.sent = [...sent].join(",");
+    next(left <= cfg.nearWithin ? cfg.nearMinutes : cfg.farMinutes);
+  } else {
+    next(started ? cfg.nearMinutes : cfg.farMinutes); // 還沒報到：每分鐘看，才抓得到報到的那一刻
+  }
+  return { update, messages, done: false, handled: true };
+}
+
 export function isExpired(row, cfg, now) {
   return now - row.created_at > cfg.maxHours * 60 * MIN;
 }

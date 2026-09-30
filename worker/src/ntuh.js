@@ -82,6 +82,51 @@ export function parseTable(html) {
   return { updatedAt, clinics };
 }
 
+// ───────────── 解析個別診的燈號頁 ClinicCurrentLightNoDetail ─────────────
+//
+//   目前燈號、已叫最大號、預計叫號（醫院排好的接下來幾位，含敬老號）、
+//   所有燈號狀態（還沒看完的號碼：看診中 / 已報到 / 未報到 / 初診；看完的會消失）
+
+const TAGS = { "onCall-tag": "oncall", "checkIn-tag": "checkin", "not-checkIn-tag": "notin", "first-tag": "first" };
+const toInt = (s) => {
+  const d = String(s ?? "").replace(/\D/g, "");
+  return d ? parseInt(d, 10) : null;
+};
+
+export function parseDetail(html) {
+  const section = (cls, endCls) => {
+    const i = html.indexOf(`class="${cls}"`);
+    if (i < 0) return "";
+    const j = endCls ? html.indexOf(`class="${endCls}"`, i) : -1;
+    return html.slice(i, j > i ? j : undefined);
+  };
+  const numberIn = (block) => toInt(block.match(/class="number">([\s\S]*?)<\/div>/)?.[1]);
+
+  const nowBlock = section("now-number", "biggest-number");
+  const expectedBlock = section("next-number", "clinic-progress");
+  const progressBlock = section("clinic-progress", "number-explain");
+
+  const statuses = [];
+  const re = /class="progress-number">\s*(\d+)[\s\S]*?class="([\w-]+-tag)"/g;
+  for (let m; (m = re.exec(progressBlock)); ) statuses.push({ n: parseInt(m[1], 10), status: TAGS[m[2]] ?? m[2] });
+
+  const expected = [];
+  const er = /class="expected-item">[\s\S]*?class="number">([^<]*)<\/span>[\s\S]*?class="type">([^<]*)<\/span>/g;
+  for (let m; (m = er.exec(expectedBlock)); ) {
+    const n = toInt(m[1]);
+    if (n !== null) expected.push({ n, type: strip(m[2]).replace(/[()（）]/g, "") });
+  }
+
+  return {
+    updatedAt: html.match(/最後更新時間[:：]\s*([\d\-: ]+)/)?.[1]?.trim() ?? null,
+    room: strip(section("room-number", "doc-name").replace(/^[^>]*>/, "").split("</div>")[0] ?? ""),
+    current: numberIn(nowBlock),
+    maxCalled: numberIn(section("biggest-number", "next-number")),
+    expected,
+    statuses,
+  };
+}
+
 // ───────────── 抓取（含 token / cookie） ─────────────
 
 const UA =
@@ -155,6 +200,20 @@ export async function fetchTable(env, hosp, ampm) {
     if (attempt === 0 && [400, 403, 404].includes(res.status)) continue;
     throw new Error(`HTTP ${res.status}`);
   }
+}
+
+/** 取得個別診的燈號頁（不需要 token）；失敗會丟出例外 */
+export async function fetchDetail(env, hosp, sid) {
+  const res = await fetch(detailUrl(baseUrl(env), hosp, sid), {
+    headers: {
+      "User-Agent": UA,
+      "Accept-Language": "zh-TW,zh;q=0.9",
+      ...(session?.cookie ? { Cookie: session.cookie } : {}),
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`燈號頁 HTTP ${res.status}`);
+  return parseDetail(await res.text());
 }
 
 /** 測試用：清除快取的 token */

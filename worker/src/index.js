@@ -5,9 +5,9 @@
 import { parseCommand, HELP } from "./commands.js";
 import { verifySignature, reply, push, textMsg, quickPostback, quickText } from "./line.js";
 import {
-  HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, parseDetailUrl, detailUrl, baseUrl,
+  HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
-import { loadConfig, onReading, onFailure, isExpired, title, CHECKIN_NOTE } from "./monitor.js";
+import { loadConfig, onReading, onFailure, onDetail, isExpired, title, CHECKIN_NOTE } from "./monitor.js";
 
 const MAX_ACTIVE_PER_CHAT = 10;
 const MAX_PER_TICK = 30;
@@ -103,6 +103,24 @@ function getTable(ctx, hosp, ampm) {
   const key = `${hosp}|${ampm}`;
   if (!ctx.tables.has(key)) ctx.tables.set(key, fetchTable(ctx.env, hosp, ampm));
   return ctx.tables.get(key);
+}
+
+/** 同一次處理內，同一診的燈號頁只抓一次 */
+function getDetail(ctx, hosp, sid) {
+  const key = `detail|${hosp}|${sid}`;
+  if (!ctx.tables.has(key)) ctx.tables.set(key, fetchDetail(ctx.env, hosp, sid));
+  return ctx.tables.get(key);
+}
+
+/** 加入追蹤時，從燈號頁判斷你目前的報到狀態 */
+function initialCheckin(d, my) {
+  const me = d?.statuses.find((s) => s.n === my);
+  if (!me) return { state: null };
+  if (me.status === "checkin" || me.status === "oncall") {
+    const ahead = d.statuses.filter((s) => s.n !== my && (s.status === "checkin" || s.status === "oncall")).map((s) => s.n);
+    return { state: "approx", ahead };
+  }
+  return { state: "no" };
 }
 
 function searchHospitals(env) {
@@ -289,21 +307,40 @@ async function addTracking(ctx, { hosp, ampm, sid, number, label = null }) {
     return `⚠️ ${c.doctor}｜${where(clinic)} 目前燈號 ${c.number}，已經到/超過 ${number} 號，沒有加入追蹤`;
   }
 
+  let detail = null;
+  try {
+    detail = await getDetail(ctx, hosp, sid);
+  } catch (e) {
+    console.warn("燈號頁讀取失敗", e.message);
+  }
+  const ci = initialCheckin(detail, number);
+
   // 加入時的回覆已經告知剩幾號：已跨過的門檻視為通知過，避免下一分鐘重複推播
-  const remaining = c.number === null ? Infinity : number - c.number;
+  const remaining = c.byCheckin
+    ? (ci.state === "approx" ? ci.ahead.length : Infinity)
+    : c.number === null ? Infinity : number - c.number;
   const sent = loadConfig(ctx.env).thresholds.filter((th) => remaining <= th).join(",");
 
   const res = await ctx.env.DB.prepare(
     `INSERT INTO trackings (chat_id, url, my_number, label, hosp, ampm, service_id, doctor, room,
-       last_number, sent, by_checkin, fail_count, fail_alerted, drop_alerted, created_at, next_check_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
+       last_number, sent, by_checkin, checkin_state, ahead, ahead_left,
+       fail_count, fail_alerted, drop_alerted, created_at, next_check_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
   ).bind(ctx.chatId, detailUrl(baseUrl(ctx.env), hosp, sid), number, label, hosp, ampm, sid, c.doctor, c.room,
-    c.number, sent, c.byCheckin ? 1 : 0, ctx.now, ctx.now + 55_000).run();
+    c.number, sent, c.byCheckin ? 1 : 0, ci.state, ci.ahead ? JSON.stringify(ci.ahead) : null,
+    ci.ahead ? ci.ahead.length : null, ctx.now, ctx.now + 55_000).run();
   const row = { id: res.meta.last_row_id, doctor: c.doctor, room: c.room, hosp, ampm, label };
 
   const lines = [`✅ 已加入追蹤 ${title(row)}`, `你的號碼：${number}`];
-  lines.push(c.number === null ? "目前尚未開始看診，開始後會通知" : `目前燈號：${c.number}（還有 ${number - c.number} 號）`);
-  if (c.byCheckin) lines.push("", `ℹ️ ${CHECKIN_NOTE}`);
+  lines.push(c.number === null ? "目前尚未開始看診，開始後會通知"
+    : c.byCheckin ? `目前燈號：${c.number}` : `目前燈號：${c.number}（還有 ${number - c.number} 號）`);
+  if (ci.state === "no") lines.push(c.byCheckin ? "你目前：未報到（報到後開始計算前面還有幾位）" : "你目前：未報到");
+  if (ci.state === "approx") {
+    lines.push(c.byCheckin
+      ? `你目前：已報到，前面最多 ${ci.ahead.length} 位（加入前就已報到，無法確定先後）`
+      : "你目前：已報到");
+  }
+  if (c.byCheckin) lines.push("", "ℹ️ 此診依報到順序看診：會依「誰比你先報到」計算前面還有幾位，請盡早報到");
   return lines.join("\n");
 }
 
@@ -323,7 +360,16 @@ async function listReply(ctx) {
   if (!rows.length) return "目前沒有追蹤中的看診。\n輸入「說明」看用法";
   const lines = [`📋 追蹤中 ${rows.length} 筆`];
   for (const r of rows) {
-    const s = r.last_number === null ? "尚未開始看診" : `目前 ${r.last_number} 號，剩 ${Math.max(r.my_number - r.last_number, 0)} 號`;
+    const now = r.last_number === null ? "尚未開始看診" : `目前 ${r.last_number} 號`;
+    let s;
+    if (r.by_checkin) {
+      s = r.checkin_state === "yes" || r.checkin_state === "approx"
+        ? `${now}，已報到，前面${r.checkin_state === "approx" ? "最多" : "還有"} ${r.ahead_left ?? "?"} 位`
+        : `${now}，未報到`;
+    } else {
+      s = r.last_number === null ? now : `${now}，剩 ${Math.max(r.my_number - r.last_number, 0)} 號`;
+      if (r.checkin_state === "no") s += "，未報到";
+    }
     const warn = (r.by_checkin ? "（依報到順序）" : "") + (r.fail_alerted ? "（⚠️ 讀取異常）" : "");
     lines.push("", title(r), `  你是 ${r.my_number} 號｜${s}${warn}｜${fmtTime(r.created_at)} 加入`);
   }
@@ -368,6 +414,38 @@ export async function tick(env, now) {
   await Promise.allSettled([...byChat].map(([chat, msgs]) => push(env, chat, msgs)));
 }
 
+const merge = (a, b) => ({ ...a, ...b, update: { ...a.update, ...b.update }, messages: [...a.messages, ...b.messages] });
+
+/** 依列表 + 個別燈號頁判斷一筆追蹤 */
+async function evaluate(row, c, cfg, ctx) {
+  let d = null;
+  try {
+    d = await getDetail(ctx, row.hosp, row.service_id);
+  } catch (e) {
+    console.warn(`#${row.id} 燈號頁讀取失敗，改用號碼判斷：${e.message}`);
+  }
+
+  if (d && c.byCheckin) {
+    const r = onDetail(row, d, true, cfg, ctx.now);
+    if (r.handled) {
+      // 報到順序模式：補上「改為依報到順序」提醒與讀取恢復
+      const head = { update: { fail_count: 0, fail_alerted: 0 }, messages: [] };
+      if (!row.by_checkin) {
+        head.update.by_checkin = 1;
+        head.messages.push(`ℹ️ ${title(row)}｜${CHECKIN_NOTE}`);
+      }
+      if (row.fail_alerted) head.messages.push(`✅ ${title(row)}｜恢復讀取`);
+      return merge(head, r);
+    }
+    return merge(r, onReading(row, c.number, cfg, ctx.now, true));
+  }
+
+  const base = onReading(row, c.number, cfg, ctx.now, c.byCheckin);
+  if (!d || base.done) return base;
+  const extra = onDetail(row, d, false, cfg, ctx.now);
+  return { ...base, update: { ...extra.update, ...base.update }, messages: [...base.messages, ...extra.messages] };
+}
+
 /** 檢查一筆追蹤，更新資料庫，回傳要推播的訊息 */
 async function checkOne(row, cfg, ctx) {
   const db = ctx.env.DB;
@@ -382,7 +460,7 @@ async function checkOne(row, cfg, ctx) {
   try {
     const table = await getTable(ctx, row.hosp, row.ampm);
     const c = table.clinics.find((x) => x.sid === row.service_id);
-    result = c ? onReading(row, c.number, cfg, ctx.now, c.byCheckin) : onFailure(row, cfg, ctx.now, "列表中找不到這一診");
+    result = c ? await evaluate(row, c, cfg, ctx) : onFailure(row, cfg, ctx.now, "列表中找不到這一診");
   } catch (e) {
     result = onFailure(row, cfg, ctx.now, e.message);
   }
