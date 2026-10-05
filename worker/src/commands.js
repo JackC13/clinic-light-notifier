@@ -124,19 +124,29 @@ export function parseCommand(raw) {
 const REMIND = "(?:(?:記得|別忘了|別忘記|不要忘了|不要忘記|要記得|提醒(?:大家|一下)?)\\s*)+";
 const QUESTION = /[?？]|嗎|什麼|甚麼|啥|哪|幾個|多少|要不要|是不是/;
 const TRAILING = /[\s!！。～~…]*(?:喔|哦|唷|呦|啊|呀|啦|欸|耶|嘿|喲|囉|哈)*[\s!！。～~…]*$/;
-const MEASURE = /^(?:一個|一些|一點|一下|一包|一盒|一瓶|個|些|點)(?=.)/;
+const MEASURE = /^(?:一(?:個|些|點|下|包|盒|瓶|袋|條|罐|份|顆|張|件|雙|支|本|片|串|箱|組|台|套)|個|些)(?=.)/;
 // 沒有「記得」開頭時，出現這些字多半是在聊天，不是要記事
 const CHATTY = /去|來|回|到|給|跟|一起|了|過|很|太|在|吧|貴|便宜|好吃|可以|不|沒|想|會|他|她|你|我/;
+// 「學校要帶…」「明天得買…」：句首的場合
+const CONTEXT = /^([^\s]{1,6}?)\s*(?:要|需要|(?<![記曉懂覺])得)\s*(?=帶|買)/;
+const PRONOUN = /我|你|他|她|大家/;
+// 「濕紙巾去學校」「健保卡到醫院」：句尾的地點
+const PLACE = /^(.+?)\s*(?:去|到)\s*(\S{1,8})$/;
+// 「月餅跟餅乾」
+const JOIN = /(?<=\S)\s*(?:跟|和|還有|以及|與|及)\s*(?=\S)/;
+// 帶「人」去某處是在聊天：「帶小孩去公園」「帶他去看醫生」
+const PEOPLE = /^(?:小孩|孩子|小朋友|兒子|女兒|寶寶|弟弟|妹妹|哥哥|姐姐|姊姊|老婆|老公|媽媽?|爸爸?|阿公|阿嬤|奶奶|爺爺|外婆|外公|狗狗?|貓咪?|他|她|你|我|大家)們?$/;
 
 /**
  * 口語記事：
  *   「記得帶大保鮮盒」「別忘了買牛奶、尿布」「記得繳停車費」
  *   「帶保鮮盒、買麵、買晚餐」（每段各自的動詞；沒寫動詞的沿用前一段：「買麵、晚餐」）
- * 問句、閒聊不觸發。
+ *   「帶月餅跟餅乾」「帶一包濕紙巾去學校」「學校要帶一包濕紙巾」→ 濕紙巾（學校）
+ *   可以分行寫多句。問句、閒聊不觸發。
  */
 export function parseNaturalNote(raw) {
   const text = String(raw ?? "").replace(/　/g, " ").trim();
-  if (!text || text.length > 60 || QUESTION.test(text) || /\n/.test(text)) return null;
+  if (!text || text.length > 120 || QUESTION.test(text)) return null;
 
   let body = text;
   let reminded = false;
@@ -145,30 +155,54 @@ export function parseNaturalNote(raw) {
     reminded = true;
     body = body.slice(r[0].length).replace(/^要\s*/, "");
   }
-  const lead = body.match(/^(?:要|順便|幫忙|幫我|麻煩)\s*(?=帶|買)/);
-  if (lead) {
-    reminded = true;
-    body = body.slice(lead[0].length);
-  }
 
-  const segs = body.split(/[、，,；;]+/).map((x) => x.replace(TRAILING, "").trim()).filter(Boolean);
+  const segs = body.split(/[、，,；;\n]+/).map((x) => x.replace(TRAILING, "").trim()).filter(Boolean);
   if (!segs.length) return null;
 
   const entries = [];
   let category = null;
   for (let seg of segs) {
+    let sure = reminded;            // 這一段有明確的記事語氣
+    const tags = [];
+    const lead = seg.match(/^(?:要|順便|幫忙|幫我|麻煩)\s*(?=帶|買)/);
+    if (lead) {
+      sure = true;
+      seg = seg.slice(lead[0].length);
+    } else {
+      const c = seg.match(CONTEXT);
+      if (c) {
+        if (PRONOUN.test(c[1])) return null;   // 「我要買午餐」是在聊天
+        sure = true;
+        tags.push(c[1]);
+        seg = seg.slice(c[0].length);
+      }
+    }
+
     const v = seg.match(/^(帶|買)\s*(.+)$/);
     if (v) {
       category = v[1] === "帶" ? "bring" : "buy";
       seg = v[2];
     } else if (!category) {
-      if (!reminded) return null; // 第一段沒有「帶 / 買」又沒有「記得」：不是記事
-      category = "todo";          // 「記得繳停車費」
+      if (!sure) return null;  // 第一段沒有「帶 / 買」又沒有「記得」：不是記事
+      category = "todo";       // 「記得繳停車費」
     }
-    seg = seg.replace(MEASURE, "").trim();
-    if (!seg) return null;
-    if (!reminded && (seg.length > 12 || CHATTY.test(seg))) return null;
-    entries.push({ category, text: seg.slice(0, 30) });
+
+    if (category !== "todo") {
+      const p = seg.match(PLACE);
+      if (p) {
+        seg = p[1];
+        if (!tags.includes(p[2])) tags.push(p[2]);
+      }
+    }
+    const items = category === "todo" ? [seg] : seg.split(JOIN);
+    for (let item of items) {
+      item = item.replace(MEASURE, "").trim();
+      if (!item) return null;
+      if (category !== "todo" && PEOPLE.test(item)) return null;
+      if (!sure && (item.length > 12 || CHATTY.test(item))) return null;
+      const t = (tags.length ? `${item}（${tags.join("、")}）` : item).slice(0, 30);
+      if (!entries.some((e) => e.category === category && e.text === t)) entries.push({ category, text: t });
+    }
   }
   return { cmd: "noteAdd", entries, natural: true };
 }
@@ -204,7 +238,7 @@ export const HELP = [
   "",
   "📝 記事本",
   "▶ 記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費",
-  "  口語也行：帶保鮮盒、買麵、買晚餐／記得帶健保卡",
+  "  口語也行：帶保鮮盒、買麵、買晚餐／學校要帶濕紙巾",
   "▶ 記事　（列出全部）",
   "▶ 完成 3　/　記事 清空 買",
   "▶ 附圖 3（再傳照片）／看圖 3",

@@ -226,9 +226,22 @@ test("notes: 口語說法", () => {
   assert.deepEqual(n("記得繳停車費喔"), ["todo:繳停車費"]);
   assert.equal(parseCommand("帶水壺").natural, true);
 });
+test("notes: 口語說法（跟 / 去哪裡 / 某處要帶 / 多行）", () => {
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(n("帶月餅跟餅乾"), ["bring:月餅", "bring:餅乾"]);
+  assert.deepEqual(n("帶一包濕紙巾去學校"), ["bring:濕紙巾（學校）"]);
+  assert.deepEqual(n("學校要帶一包濕紙巾"), ["bring:濕紙巾（學校）"]);
+  assert.deepEqual(n("明天要買牛奶和吐司"), ["buy:牛奶（明天）", "buy:吐司（明天）"]);
+  assert.deepEqual(n("帶健保卡到醫院"), ["bring:健保卡（醫院）"]);
+  assert.deepEqual(n("帶媽媽手冊"), ["bring:媽媽手冊"]);
+  assert.deepEqual(n("買點心"), ["buy:點心"]);
+  assert.deepEqual(n("帶月餅跟餅乾，帶一包濕紙巾去學校，學校要帶一包濕紙巾"),
+    ["bring:月餅", "bring:餅乾", "bring:濕紙巾（學校）"]);
+  assert.deepEqual(n("帶月餅跟餅乾\n學校要帶一包濕紙巾"), ["bring:月餅", "bring:餅乾", "bring:濕紙巾（學校）"]);
+});
 test("notes: 口語說法不誤觸（問句、閒聊）", () => {
   for (const t of ["今天要買什麼？", "要買嗎", "記得嗎", "我要買午餐", "帶小孩去公園", "記得那天很好玩嗎", "哈哈記得帶傘",
-    "買了晚餐", "買房子好貴", "帶他去看醫生", "買麵、我晚點回去"]) {
+    "買了晚餐", "買房子好貴", "帶他去看醫生", "買麵、我晚點回去", "我們要帶小孩去玩", "帶狗狗去散步", "你要買嗎"]) {
     assert.equal(parseCommand(t), null, t);
   }
 });
