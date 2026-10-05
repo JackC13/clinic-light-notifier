@@ -293,6 +293,12 @@ function clinicsFlex(clinics, hosp, ampm, n) {
 async function onPostback(d, ctx) {
   if (d.a === "h") return guide({ hosp: d.h, number: d.n }, ctx);
   if (d.a === "p") return guide({ hosp: d.h, ampm: d.p, number: d.n }, ctx);
+  if (d.a === "undo" && Array.isArray(d.ids) && d.ids.length) {
+    const ids = d.ids.map(Number).filter(Number.isInteger).slice(0, 20);
+    const marks = ids.map(() => "?").join(",");
+    const r = await ctx.env.DB.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...ids).run();
+    return r.meta.changes ? "↩️ 已撤銷" : "已經刪除或完成了";
+  }
   if (d.a === "s") {
     if (d.n) return addTracking(ctx, { hosp: d.h, ampm: d.p, sid: d.s, number: d.n });
     const c = await findClinic(ctx, d.h, d.p, d.s);
@@ -447,10 +453,18 @@ async function noteAdd(cmd, ctx) {
   const db = ctx.env.DB;
   const count = (await db.prepare("SELECT COUNT(*) AS n FROM notes WHERE chat_id = ?").bind(ctx.chatId).first()).n;
   if (count + cmd.items.length > MAX_NOTES_PER_CHAT) return `❌ 記事最多 ${MAX_NOTES_PER_CHAT} 筆，請先完成一些`;
-  await db.batch(cmd.items.map((text) =>
+  const results = await db.batch(cmd.items.map((text) =>
     db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)").bind(ctx.chatId, cmd.category, text, ctx.now)));
   const c = catOf(cmd.category);
-  return notesReply(ctx, `${c.icon} 已記到「${c.name}」：${cmd.items.join("、")}`);
+  const head = `${c.icon} 已記到「${c.name}」：${cmd.items.join("、")}`;
+  if (!cmd.natural) return notesReply(ctx, head);
+
+  // 口語觸發：簡短回覆，附「撤銷」按鈕（萬一是誤記）
+  const ids = results.map((r) => r.meta.last_row_id);
+  return textMsg(head, [
+    quickPostback("↩️ 撤銷", { a: "undo", ids }, "撤銷"),
+    quickText("📝 看記事", "記事"),
+  ]);
 }
 
 async function noteDone(cmd, ctx) {
