@@ -85,7 +85,8 @@ async function handleEvent(event, env, origin) {
 
 async function runCommand(cmd, ctx) {
   switch (cmd.cmd) {
-    case "help": return HELP;
+    case "help": return textMsg(HELP, [quickText("☰ 選單", "選單")]);
+    case "menu": return menuCard(ctx);
     case "usage": return `❓ ${cmd.reason}\n\n輸入「說明」看完整用法`;
     case "list": return listReply(ctx);
     case "cancel": return cancel(cmd, ctx);
@@ -300,6 +301,7 @@ async function onPostback(d, ctx) {
   if (d.a === "h") return guide({ hosp: d.h, number: d.n }, ctx);
   if (d.a === "p") return guide({ hosp: d.h, ampm: d.p, number: d.n }, ctx);
   if (d.a === "photo") return photoAsk(Number(d.id), ctx);
+  if (d.a === "hint") return HINTS[d.k] ?? null;
   if (d.a === "undo" && Array.isArray(d.ids) && d.ids.length) {
     const ids = d.ids.map(Number).filter(Number.isInteger).slice(0, 20);
     const marks = ids.map(() => "?").join(",");
@@ -435,6 +437,69 @@ async function cancel(cmd, ctx) {
   if (!row) return `找不到 #${cmd.id}，輸入「列表」查看編號`;
   await db.prepare("DELETE FROM trackings WHERE id = ?").bind(cmd.id).run();
   return `🗑 已取消 ${title(row)}，${row.my_number} 號`;
+}
+
+// ───────────────────────── 選單卡片 ─────────────────────────
+
+const HINTS = {
+  lookup: textMsg("🔎 直接輸入「燈號 醫師名」\n例：燈號 戴季珊"),
+  track: textMsg("🩺 直接輸入「追蹤 號碼 醫師名」最快\n例：追蹤 25 戴季珊\n\n或用按鈕一步一步選：", [quickText("用按鈕選", "追蹤")]),
+  note: textMsg([
+    "✏️ 直接打字就能記：",
+    "　帶保鮮盒、買麵、買晚餐",
+    "　記得帶健保卡",
+    "　記得繳停車費",
+    "",
+    "記下後可以按「📷 附圖」加照片",
+  ].join("\n")),
+};
+
+async function menuCard(ctx) {
+  const db = ctx.env.DB;
+  const [t, n] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS c FROM trackings WHERE chat_id = ?").bind(ctx.chatId).first(),
+    db.prepare("SELECT COUNT(*) AS c FROM notes WHERE chat_id = ?").bind(ctx.chatId).first(),
+  ]);
+
+  const btn = (label, action, style = "secondary") => ({
+    type: "button", style, height: "sm", flex: 1,
+    action: { label, ...action },
+  });
+  const msg = (label, text, style) => btn(label, { type: "message", text }, style);
+  const hint = (label, k, style) => btn(label, { type: "postback", data: JSON.stringify({ a: "hint", k }), displayText: label }, style);
+  const row = (...buttons) => ({ type: "box", layout: "horizontal", spacing: "sm", contents: buttons });
+  const section = (title, badge) => ({
+    type: "box", layout: "horizontal", margin: "lg",
+    contents: [
+      { type: "text", text: title, weight: "bold", size: "sm", color: "#1F2937", flex: 1 },
+      { type: "text", text: badge, size: "xs", color: "#6B7280", align: "end", gravity: "center" },
+    ],
+  });
+
+  const bubble = {
+    type: "bubble",
+    size: "kilo",
+    header: {
+      type: "box", layout: "vertical", backgroundColor: "#0F766E", paddingAll: "md",
+      contents: [
+        { type: "text", text: "☰ 選單", weight: "bold", size: "lg", color: "#FFFFFF" },
+        { type: "text", text: "點按鈕操作，也可以直接打字", size: "xxs", color: "#CCFBF1" },
+      ],
+    },
+    body: {
+      type: "box", layout: "vertical", spacing: "sm", paddingTop: "sm",
+      contents: [
+        section("🩺 看診", t.c ? `追蹤中 ${t.c} 筆` : "沒有追蹤"),
+        row(hint("追蹤看診", "track", "primary"), msg("追蹤列表", "列表")),
+        row(hint("查燈號", "lookup"), msg("說明", "說明")),
+        { type: "separator", margin: "lg" },
+        section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
+        row(msg("看記事", "記事", "primary"), hint("記一筆", "note")),
+      ],
+    },
+    styles: { header: { separator: false } },
+  };
+  return { type: "flex", altText: `☰ 選單（追蹤中 ${t.c} 筆、記事 ${n.c} 筆）`, contents: bubble };
 }
 
 // ───────────────────────── 記事本 / 備註 ─────────────────────────

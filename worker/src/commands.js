@@ -67,6 +67,7 @@ export function parseCommand(raw) {
   }
 
   if (["說明", "help", "指令", "用法"].includes(key) && tokens.length === 0) return { cmd: "help" };
+  if (["選單", "menu", "功能", "主選單", "目錄"].includes(key) && tokens.length === 0) return { cmd: "menu" };
 
   // ── 記事本 ──
   // 手機上常不打空格：「記買尿布」「記帶 健保卡」
@@ -187,6 +188,7 @@ const NOTE_ALIASES = {
 
 export const HELP = [
   "📋 看診燈號提醒（臺大醫院）",
+  "輸入「選單」可以用按鈕操作",
   "",
   "▶ 追蹤 25 戴季珊",
   "  用醫師名找今天的門診，開始追蹤 25 號",

@@ -238,3 +238,9 @@ test("notes: 附圖 / 看圖指令", () => {
   assert.deepEqual(parseCommand("看圖 #3"), { cmd: "photoShow", id: 3 });
   assert.equal(parseCommand("附圖").cmd, "usage");
 });
+
+test("menu: 選單指令", () => {
+  assert.deepEqual(parseCommand("選單"), { cmd: "menu" });
+  assert.deepEqual(parseCommand("menu"), { cmd: "menu" });
+  assert.equal(parseCommand("選單好醜"), null);
+});
