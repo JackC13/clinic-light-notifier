@@ -512,11 +512,11 @@ async function menuCard(ctx) {
             },
             // 黃色鈴鐺
             { type: "box", layout: "vertical", width: "18px", height: "18px", cornerRadius: "xxl",
-              backgroundColor: THEME.yellow, borderColor: "#C9A400", borderWidth: "1px", contents: [{ type: "filler" }] },
+              backgroundColor: THEME.yellow, borderColor: "#C9A400", borderWidth: "1px", contents: [] },
           ],
         },
         // 紅色項圈
-        { type: "box", layout: "vertical", height: "6px", backgroundColor: THEME.red, contents: [{ type: "filler" }] },
+        { type: "box", layout: "vertical", height: "6px", backgroundColor: THEME.red, contents: [] },
       ],
     },
     body: {
