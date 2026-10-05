@@ -14,7 +14,7 @@ database_id = "814d947c-4490-416d-8457-fccad3c51733"
 # 記事附圖（npx wrangler kv namespace create IMAGES 之後貼上 id）
 [[kv_namespaces]]
 binding = "IMAGES"
-id = "REPLACE_WITH_YOUR_KV_ID"
+id = "83b4b8ba12a9437b90386232de48f52b"
 
 [vars]
 # 允許下指令的聊天室（群組 C… / 個人 U…），逗號分隔
