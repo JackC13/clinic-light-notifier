@@ -232,3 +232,9 @@ test("notes: 口語說法不誤觸（問句、閒聊）", () => {
     assert.equal(parseCommand(t), null, t);
   }
 });
+
+test("notes: 附圖 / 看圖指令", () => {
+  assert.deepEqual(parseCommand("附圖 3"), { cmd: "photoAsk", id: 3 });
+  assert.deepEqual(parseCommand("看圖 #3"), { cmd: "photoShow", id: 3 });
+  assert.equal(parseCommand("附圖").cmd, "usage");
+});

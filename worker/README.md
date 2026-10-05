@@ -29,6 +29,12 @@
 | `記事` | 依分類列出全部，下方有「完成」按鈕 |
 | `完成 3` / `完成 3 5 7` | 打勾完成（刪除） |
 | `記事 清空 買` / `記事 清空` | 清空某一類 / 全部 |
+| `附圖 3` / `看圖 3` | 幫記事 #3 附一張照片 / 看照片 |
+
+**附圖**：記下事項後，回覆下方有「📷 附圖」按鈕，按下後再按「拍照」或「相簿」傳一張照片，就會掛在那筆記事上。
+只有按「附圖」的那個人、5 分鐘內傳的下一張照片會被收下，群組裡其他照片不受影響。
+`記事` 列表中有附圖的會標 📷，下方有「看圖」按鈕。記事完成或清空時，照片一併刪除。
+照片存在 Cloudflare KV（免費 1GB），網址是隨機產生的長字串，只有拿到網址的人看得到。
 
 **口語也可以**：
 - 直接用「帶 / 買」開頭，一句話可以混著寫：`帶保鮮盒、買麵、買晚餐` → 帶：保鮮盒｜買：麵、晚餐
@@ -68,6 +74,7 @@
 npm install
 npx wrangler login                     # 開瀏覽器登入 Cloudflare
 npx wrangler d1 create clinic-light    # 把輸出的 database_id 貼到 wrangler.toml
+npx wrangler kv namespace create IMAGES   # 把輸出的 id 貼到 wrangler.toml 的 [[kv_namespaces]]（記事附圖用）
 npm run db:migrate                     # 建立 / 更新資料表
 npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
 npx wrangler secret put LINE_CHANNEL_SECRET

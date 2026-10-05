@@ -95,6 +95,14 @@ export function parseCommand(raw) {
     if (!ids.length) return { cmd: "usage", reason: "格式：完成 3（可一次多筆：完成 3 5 7）" };
     return { cmd: "noteDone", ids };
   }
+  if (["附圖", "加圖"].includes(key)) {
+    const id = tokens.join("").match(/\d+/)?.[0];
+    return id ? { cmd: "photoAsk", id: parseInt(id, 10) } : { cmd: "usage", reason: "格式：附圖 3（再傳一張照片）" };
+  }
+  if (["看圖", "圖"].includes(key)) {
+    const id = tokens.join("").match(/\d+/)?.[0];
+    return id ? { cmd: "photoShow", id: parseInt(id, 10) } : { cmd: "usage", reason: "格式：看圖 3" };
+  }
   if (["備註", "註記"].includes(key)) {
     const m = tokens.join(" ").match(/^#?(\d+)\s*(.*)$/);
     if (!m) return { cmd: "usage", reason: "格式：備註 3 帶健保卡和報告（不寫內容＝清除備註）" };
@@ -197,6 +205,7 @@ export const HELP = [
   "  口語也行：帶保鮮盒、買麵、買晚餐／記得帶健保卡",
   "▶ 記事　（列出全部）",
   "▶ 完成 3　/　記事 清空 買",
+  "▶ 附圖 3（再傳照片）／看圖 3",
   "",
   "剩 10、5、2 號與到號時通知，到號後自動移除。",
 ].join("\n");

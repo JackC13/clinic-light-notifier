@@ -76,3 +76,21 @@ export function push(env, to, texts) {
     messages: [{ type: "text", text: clip(texts.join("\n")) }],
   });
 }
+
+/** 下載使用者傳來的圖片（原圖與預覽圖） */
+export async function getContent(env, messageId, preview = false) {
+  const base = env.LINE_DATA_BASE || "https://api-data.line.me";
+  const res = await fetch(`${base}/v2/bot/message/${messageId}/content${preview ? "/preview" : ""}`, {
+    headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`下載圖片失敗 HTTP ${res.status}`);
+  return { body: await res.arrayBuffer(), type: res.headers.get("Content-Type") || "image/jpeg" };
+}
+
+export function imageMsg(url, previewUrl = url) {
+  return { type: "image", originalContentUrl: url, previewImageUrl: previewUrl };
+}
+
+/** 快速回覆：開相機 / 相簿 */
+export const quickCamera = () => ({ type: "action", action: { type: "camera", label: "📷 拍照" } });
+export const quickCameraRoll = () => ({ type: "action", action: { type: "cameraRoll", label: "🖼 相簿" } });

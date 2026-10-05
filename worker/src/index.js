@@ -3,7 +3,7 @@
 //   scheduled : 每分鐘檢查到期的追蹤，抓燈號、推播
 
 import { parseCommand, HELP, NOTE_CATEGORIES } from "./commands.js";
-import { verifySignature, reply, push, textMsg, quickPostback, quickText } from "./line.js";
+import { verifySignature, reply, push, textMsg, quickPostback, quickText, getContent, imageMsg, quickCamera, quickCameraRoll } from "./line.js";
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
@@ -17,6 +17,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/") return new Response("clinic-light-bot OK");
+    const img = url.pathname.match(/^\/img\/([0-9a-f]{32}(?:_p)?)$/);
+    if (request.method === "GET" && img) return serveImage(env, img[1]);
     if (request.method !== "POST" || url.pathname !== "/webhook") return new Response("Not found", { status: 404 });
 
     const body = await request.text();
@@ -30,7 +32,7 @@ export default {
       return new Response("Bad JSON", { status: 400 });
     }
     // 先回 200 給 LINE，指令在背景處理
-    ctx.waitUntil(Promise.allSettled(events.map((e) => handleEvent(e, env))));
+    ctx.waitUntil(Promise.allSettled(events.map((e) => handleEvent(e, env, url.origin))));
     return new Response("OK");
   },
 
@@ -45,13 +47,14 @@ function allowedChats(env) {
   return String(env.ALLOWED_CHAT_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-async function handleEvent(event, env) {
+async function handleEvent(event, env, origin) {
   const src = event.source ?? {};
   const chatId = src.groupId ?? src.roomId ?? src.userId;
   if (!chatId || !event.replyToken) return;
 
   let cmd = null;
   if (event.type === "message" && event.message?.type === "text") cmd = parseCommand(event.message.text);
+  else if (event.type === "message" && event.message?.type === "image") cmd = { cmd: "image", messageId: event.message.id };
   else if (event.type === "postback") {
     try {
       cmd = { cmd: "postback", data: JSON.parse(event.postback.data) };
@@ -63,13 +66,13 @@ async function handleEvent(event, env) {
 
   const allowed = allowedChats(env);
   if (allowed.length === 0) {
-    if (cmd.cmd === "number") return;
+    if (cmd.cmd === "number" || cmd.cmd === "image") return;
     return reply(env, event.replyToken,
       `🔒 尚未設定授權聊天室。\n這個聊天室的 ID：\n${chatId}\n請加到 ALLOWED_CHAT_IDS 後重新部署。`);
   }
   if (!allowed.includes(chatId)) return;
 
-  const ctx = { env, chatId, userId: src.userId ?? "", now: Date.now(), tables: new Map() };
+  const ctx = { env, origin, chatId, userId: src.userId ?? "", now: Date.now(), tables: new Map() };
   let out;
   try {
     out = await runCommand(cmd, ctx);
@@ -97,6 +100,9 @@ async function runCommand(cmd, ctx) {
     case "noteDone": return noteDone(cmd, ctx);
     case "noteClear": return noteClear(cmd, ctx);
     case "label": return setLabel(cmd, ctx);
+    case "photoAsk": return photoAsk(cmd.id, ctx);
+    case "photoShow": return photoShow(cmd.id, ctx);
+    case "image": return onImage(cmd, ctx);
     case "diagnose": {
       const hosp = cmd.hosp ?? "CH";
       const ampm = cmd.ampm ?? currentAmpm(ctx.now);
@@ -293,9 +299,13 @@ function clinicsFlex(clinics, hosp, ampm, n) {
 async function onPostback(d, ctx) {
   if (d.a === "h") return guide({ hosp: d.h, number: d.n }, ctx);
   if (d.a === "p") return guide({ hosp: d.h, ampm: d.p, number: d.n }, ctx);
+  if (d.a === "photo") return photoAsk(Number(d.id), ctx);
   if (d.a === "undo" && Array.isArray(d.ids) && d.ids.length) {
     const ids = d.ids.map(Number).filter(Number.isInteger).slice(0, 20);
     const marks = ids.map(() => "?").join(",");
+    const { results: rows } = await ctx.env.DB.prepare(`SELECT image_key FROM notes WHERE chat_id = ? AND id IN (${marks})`)
+      .bind(ctx.chatId, ...ids).all();
+    await deleteImages(ctx.env, rows);
     const r = await ctx.env.DB.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...ids).run();
     return r.meta.changes ? "↩️ 已撤銷" : "已經刪除或完成了";
   }
@@ -432,7 +442,7 @@ async function cancel(cmd, ctx) {
 const MAX_NOTES_PER_CHAT = 100;
 const catOf = (key) => NOTE_CATEGORIES.find((c) => c.key === key) ?? NOTE_CATEGORIES.at(-1);
 
-async function notesReply(ctx, header = null) {
+async function notesReply(ctx, header = null, extraQuick = []) {
   const { results } = await ctx.env.DB.prepare("SELECT * FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all();
   if (!results.length) {
     return [header, "📝 記事本是空的。", "新增：記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費"].filter(Boolean).join("\n");
@@ -442,10 +452,14 @@ async function notesReply(ctx, header = null) {
   for (const c of NOTE_CATEGORIES) {
     const items = results.filter((n) => n.category === c.key);
     if (!items.length) continue;
-    lines.push("", `${c.icon} ${c.name}`, ...items.map((n) => `  #${n.id} ${n.text}`));
+    lines.push("", `${c.icon} ${c.name}`, ...items.map((n) => `  #${n.id} ${n.text}${n.image_key ? " 📷" : ""}`));
   }
   lines.push("", "完成：完成 編號（可多筆）");
-  const quick = results.slice(0, 13).map((n) => quickText(`完成 #${n.id} ${n.text}`, `完成 ${n.id}`));
+  const quick = [
+    ...extraQuick,
+    ...results.filter((n) => n.image_key).map((n) => quickText(`🖼 看圖 #${n.id} ${n.text}`, `看圖 ${n.id}`)),
+    ...results.map((n) => quickText(`完成 #${n.id} ${n.text}`, `完成 ${n.id}`)),
+  ];
   return textMsg(lines.join("\n"), quick);
 }
 
@@ -463,12 +477,16 @@ async function noteAdd(cmd, ctx) {
     .filter((x) => x.texts.length)
     .map(({ c, texts }) => `${c.icon} ${c.name}：${texts.join("、")}`);
   const head = `已記下 ${parts.join("｜")}`;
-  if (!cmd.natural) return notesReply(ctx, head);
+  const ids = results.map((r) => r.meta.last_row_id);
+  // 附圖按鈕：一次記多項時，每項各一個（快速回覆最多 13 個）
+  const photoQuick = ids.slice(0, 8).map((id, i) =>
+    quickPostback(ids.length > 1 ? `📷 ${entries[i].text}` : "📷 附圖", { a: "photo", id }, `附圖給「${entries[i].text}」`));
+  if (!cmd.natural) return notesReply(ctx, head, photoQuick);
 
   // 口語觸發：簡短回覆，附「撤銷」按鈕（萬一是誤記）
-  const ids = results.map((r) => r.meta.last_row_id);
   return textMsg(head, [
     quickPostback("↩️ 撤銷", { a: "undo", ids }, "撤銷"),
+    ...photoQuick,
     quickText("📝 看記事", "記事"),
   ]);
 }
@@ -478,17 +496,85 @@ async function noteDone(cmd, ctx) {
   const marks = cmd.ids.map(() => "?").join(",");
   const { results } = await db.prepare(`SELECT * FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...cmd.ids).all();
   if (!results.length) return `找不到 ${cmd.ids.map((i) => `#${i}`).join("、")}，輸入「記事」查看編號`;
+  await deleteImages(ctx.env, results);
   await db.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...cmd.ids).run();
   return notesReply(ctx, `✔️ 完成：${results.map((n) => n.text).join("、")}`);
 }
 
 async function noteClear(cmd, ctx) {
   const db = ctx.env.DB;
+  const { results: withImg } = cmd.category
+    ? await db.prepare("SELECT image_key FROM notes WHERE chat_id = ? AND category = ? AND image_key IS NOT NULL").bind(ctx.chatId, cmd.category).all()
+    : await db.prepare("SELECT image_key FROM notes WHERE chat_id = ? AND image_key IS NOT NULL").bind(ctx.chatId).all();
+  await deleteImages(ctx.env, withImg);
   const r = cmd.category
     ? await db.prepare("DELETE FROM notes WHERE chat_id = ? AND category = ?").bind(ctx.chatId, cmd.category).run()
     : await db.prepare("DELETE FROM notes WHERE chat_id = ?").bind(ctx.chatId).run();
   const what = cmd.category ? `「${catOf(cmd.category).name}」` : "全部記事";
   return r.meta.changes ? `🗑 已清空${what}（${r.meta.changes} 筆）` : `${what}本來就是空的`;
+}
+
+// ── 記事附圖 ──
+
+const PHOTO_TTL = 5 * 60_000;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+async function photoAsk(id, ctx) {
+  const note = await ctx.env.DB.prepare("SELECT * FROM notes WHERE id = ? AND chat_id = ?").bind(id, ctx.chatId).first();
+  if (!note) return `找不到記事 #${id}，輸入「記事」查看編號`;
+  if (!ctx.env.IMAGES) return "❌ 附圖功能尚未設定（wrangler.toml 缺少 IMAGES 的 KV 設定）";
+  await ctx.env.DB.prepare("INSERT OR REPLACE INTO pending_photo (chat_id, user_id, note_id, expires_at) VALUES (?, ?, ?, ?)")
+    .bind(ctx.chatId, ctx.userId, id, ctx.now + PHOTO_TTL).run();
+  return textMsg(`📷 請在 5 分鐘內傳一張照片給「${note.text}」`, [quickCamera(), quickCameraRoll()]);
+}
+
+async function onImage(cmd, ctx) {
+  const db = ctx.env.DB;
+  const p = await db.prepare("SELECT * FROM pending_photo WHERE chat_id = ? AND user_id = ?").bind(ctx.chatId, ctx.userId).first();
+  if (!p || p.expires_at < ctx.now) return null; // 一般照片：不理會
+  await db.prepare("DELETE FROM pending_photo WHERE chat_id = ? AND user_id = ?").bind(ctx.chatId, ctx.userId).run();
+  const note = await db.prepare("SELECT * FROM notes WHERE id = ? AND chat_id = ?").bind(p.note_id, ctx.chatId).first();
+  if (!note) return "這筆記事已經不在了";
+
+  const orig = await getContent(ctx.env, cmd.messageId);
+  if (orig.body.byteLength > MAX_IMAGE_BYTES) return "❌ 圖片太大（上限 10MB）";
+  let prev = orig;
+  try {
+    prev = await getContent(ctx.env, cmd.messageId, true);
+  } catch {
+    // 沒有預覽圖就用原圖
+  }
+  const key = crypto.randomUUID().replace(/-/g, "");
+  await ctx.env.IMAGES.put(`img:${key}`, orig.body, { metadata: { type: orig.type } });
+  await ctx.env.IMAGES.put(`img:${key}_p`, prev.body, { metadata: { type: prev.type } });
+  if (note.image_key) await deleteImages(ctx.env, [note]);
+  await db.prepare("UPDATE notes SET image_key = ? WHERE id = ?").bind(key, note.id).run();
+  return textMsg(`📷 已附圖：#${note.id} ${note.text}`, [quickText("🖼 看圖", `看圖 ${note.id}`), quickText("📝 看記事", "記事")]);
+}
+
+async function photoShow(id, ctx) {
+  const note = await ctx.env.DB.prepare("SELECT * FROM notes WHERE id = ? AND chat_id = ?").bind(id, ctx.chatId).first();
+  if (!note) return `找不到記事 #${id}`;
+  if (!note.image_key) return textMsg(`#${id} ${note.text} 還沒有附圖`, [quickPostback("📷 附圖", { a: "photo", id }, `附圖給「${note.text}」`)]);
+  return [
+    `🖼 #${note.id} ${note.text}`,
+    imageMsg(`${ctx.origin}/img/${note.image_key}`, `${ctx.origin}/img/${note.image_key}_p`),
+  ];
+}
+
+async function deleteImages(env, rows) {
+  if (!env.IMAGES) return;
+  await Promise.allSettled(rows.filter((r) => r.image_key).flatMap((r) =>
+    [env.IMAGES.delete(`img:${r.image_key}`), env.IMAGES.delete(`img:${r.image_key}_p`)]));
+}
+
+async function serveImage(env, key) {
+  if (!env.IMAGES) return new Response("Not found", { status: 404 });
+  const { value, metadata } = await env.IMAGES.getWithMetadata(`img:${key}`, { type: "arrayBuffer" });
+  if (!value) return new Response("Not found", { status: 404 });
+  return new Response(value, {
+    headers: { "Content-Type": metadata?.type ?? "image/jpeg", "Cache-Control": "private, max-age=86400" },
+  });
 }
 
 async function setLabel(cmd, ctx) {
@@ -504,6 +590,7 @@ async function setLabel(cmd, ctx) {
 export async function tick(env, now) {
   const cfg = loadConfig(env);
   await env.DB.prepare("DELETE FROM pending WHERE expires_at < ?").bind(now).run();
+  await env.DB.prepare("DELETE FROM pending_photo WHERE expires_at < ?").bind(now).run();
   const { results } = await env.DB.prepare(
     "SELECT * FROM trackings WHERE next_check_at <= ? ORDER BY next_check_at LIMIT ?",
   ).bind(now, MAX_PER_TICK).all();
