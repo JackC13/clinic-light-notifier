@@ -454,6 +454,17 @@ const HINTS = {
   ].join("\n")),
 };
 
+// 配色：天空藍、白、項圈紅、鈴鐺黃
+const THEME = {
+  blue: "#0A9FE8",
+  blueDark: "#0577B8",
+  blueSoft: "#E3F4FD",
+  red: "#E60033",
+  yellow: "#FFD400",
+  ink: "#12324A",
+  muted: "#5B7A90",
+};
+
 async function menuCard(ctx) {
   const db = ctx.env.DB;
   const [t, n] = await Promise.all([
@@ -461,18 +472,25 @@ async function menuCard(ctx) {
     db.prepare("SELECT COUNT(*) AS c FROM notes WHERE chat_id = ?").bind(ctx.chatId).first(),
   ]);
 
-  const btn = (label, action, style = "secondary") => ({
-    type: "button", style, height: "sm", flex: 1,
+  const btn = (label, action, primary = false) => ({
+    type: "button", height: "sm", flex: 1,
+    style: primary ? "primary" : "secondary",
+    color: primary ? THEME.blue : THEME.blueSoft,
     action: { label, ...action },
   });
-  const msg = (label, text, style) => btn(label, { type: "message", text }, style);
-  const hint = (label, k, style) => btn(label, { type: "postback", data: JSON.stringify({ a: "hint", k }), displayText: label }, style);
+  const msg = (label, text, primary) => btn(label, { type: "message", text }, primary);
+  const hint = (label, k, primary) => btn(label, { type: "postback", data: JSON.stringify({ a: "hint", k }), displayText: label }, primary);
   const row = (...buttons) => ({ type: "box", layout: "horizontal", spacing: "sm", contents: buttons });
-  const section = (title, badge) => ({
-    type: "box", layout: "horizontal", margin: "lg",
+  const badge = (text) => ({
+    type: "box", layout: "vertical", backgroundColor: THEME.yellow, cornerRadius: "xl",
+    paddingStart: "md", paddingEnd: "md", paddingTop: "2px", paddingBottom: "2px", flex: 0,
+    contents: [{ type: "text", text, size: "xxs", color: THEME.ink, weight: "bold" }],
+  });
+  const section = (title, badgeText) => ({
+    type: "box", layout: "horizontal", margin: "lg", alignItems: "center",
     contents: [
-      { type: "text", text: title, weight: "bold", size: "sm", color: "#1F2937", flex: 1 },
-      { type: "text", text: badge, size: "xs", color: "#6B7280", align: "end", gravity: "center" },
+      { type: "text", text: title, weight: "bold", size: "sm", color: THEME.ink, flex: 1 },
+      badge(badgeText),
     ],
   });
 
@@ -480,21 +498,36 @@ async function menuCard(ctx) {
     type: "bubble",
     size: "kilo",
     header: {
-      type: "box", layout: "vertical", backgroundColor: "#0F766E", paddingAll: "md",
+      type: "box", layout: "vertical", paddingAll: "none", backgroundColor: THEME.blue,
       contents: [
-        { type: "text", text: "☰ 選單", weight: "bold", size: "lg", color: "#FFFFFF" },
-        { type: "text", text: "點按鈕操作，也可以直接打字", size: "xxs", color: "#CCFBF1" },
+        {
+          type: "box", layout: "horizontal", paddingAll: "md", alignItems: "center",
+          contents: [
+            {
+              type: "box", layout: "vertical", flex: 1,
+              contents: [
+                { type: "text", text: "☰ 選單", weight: "bold", size: "lg", color: "#FFFFFF" },
+                { type: "text", text: "點按鈕操作，也可以直接打字", size: "xxs", color: "#D6F0FF" },
+              ],
+            },
+            // 黃色鈴鐺
+            { type: "box", layout: "vertical", width: "18px", height: "18px", cornerRadius: "xxl",
+              backgroundColor: THEME.yellow, borderColor: "#C9A400", borderWidth: "1px", contents: [{ type: "filler" }] },
+          ],
+        },
+        // 紅色項圈
+        { type: "box", layout: "vertical", height: "6px", backgroundColor: THEME.red, contents: [{ type: "filler" }] },
       ],
     },
     body: {
       type: "box", layout: "vertical", spacing: "sm", paddingTop: "sm",
       contents: [
         section("🩺 看診", t.c ? `追蹤中 ${t.c} 筆` : "沒有追蹤"),
-        row(hint("追蹤看診", "track", "primary"), msg("追蹤列表", "列表")),
+        row(hint("追蹤看診", "track", true), msg("追蹤列表", "列表")),
         row(hint("查燈號", "lookup"), msg("說明", "說明")),
-        { type: "separator", margin: "lg" },
+        { type: "separator", margin: "lg", color: THEME.blueSoft },
         section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
-        row(msg("看記事", "記事", "primary"), hint("記一筆", "note")),
+        row(msg("看記事", "記事", true), hint("記一筆", "note")),
       ],
     },
     styles: { header: { separator: false } },
@@ -745,3 +778,6 @@ async function checkOne(row, cfg, ctx) {
   }
   return result.messages;
 }
+
+// 測試用
+export const __menuCardForTest = (ctx) => menuCard(ctx);
