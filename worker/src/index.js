@@ -451,12 +451,18 @@ async function notesReply(ctx, header = null) {
 
 async function noteAdd(cmd, ctx) {
   const db = ctx.env.DB;
+  const entries = cmd.entries ?? cmd.items.map((text) => ({ category: cmd.category, text }));
   const count = (await db.prepare("SELECT COUNT(*) AS n FROM notes WHERE chat_id = ?").bind(ctx.chatId).first()).n;
-  if (count + cmd.items.length > MAX_NOTES_PER_CHAT) return `❌ 記事最多 ${MAX_NOTES_PER_CHAT} 筆，請先完成一些`;
-  const results = await db.batch(cmd.items.map((text) =>
-    db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)").bind(ctx.chatId, cmd.category, text, ctx.now)));
-  const c = catOf(cmd.category);
-  const head = `${c.icon} 已記到「${c.name}」：${cmd.items.join("、")}`;
+  if (count + entries.length > MAX_NOTES_PER_CHAT) return `❌ 記事最多 ${MAX_NOTES_PER_CHAT} 筆，請先完成一些`;
+  const results = await db.batch(entries.map((e) =>
+    db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)").bind(ctx.chatId, e.category, e.text, ctx.now)));
+
+  // 依分類整理：「🎒 帶：保鮮盒｜🛒 買：麵、晚餐」
+  const parts = NOTE_CATEGORIES
+    .map((c) => ({ c, texts: entries.filter((e) => e.category === c.key).map((e) => e.text) }))
+    .filter((x) => x.texts.length)
+    .map(({ c, texts }) => `${c.icon} ${c.name}：${texts.join("、")}`);
+  const head = `已記下 ${parts.join("｜")}`;
   if (!cmd.natural) return notesReply(ctx, head);
 
   // 口語觸發：簡短回覆，附「撤銷」按鈕（萬一是誤記）

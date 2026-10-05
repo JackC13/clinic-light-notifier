@@ -113,29 +113,55 @@ export function parseCommand(raw) {
 // 只認句首的固定說法；問句一律不理，避免把群組閒聊誤記下來。
 
 const REMIND = "(?:(?:記得|別忘了|別忘記|不要忘了|不要忘記|要記得|提醒(?:大家|一下)?)\\s*)+";
-const NATURAL = [
-  { re: new RegExp(`^${REMIND}\\s*要?\\s*(帶|買)\\s*(.+)$`) },
-  { re: /^(?:要|順便|幫忙|幫我|麻煩)\s*(帶|買)\s*(.+)$/ },
-  { re: new RegExp(`^${REMIND}\\s*要?\\s*(.+)$`), category: "todo" },
-];
 const QUESTION = /[?？]|嗎|什麼|甚麼|啥|哪|幾個|多少|要不要|是不是/;
 const TRAILING = /[\s!！。～~…]*(?:喔|哦|唷|呦|啊|呀|啦|欸|耶|嘿|喲|囉|哈)*[\s!！。～~…]*$/;
+const MEASURE = /^(?:一個|一些|一點|一下|一包|一盒|一瓶|個|些|點)(?=.)/;
+// 沒有「記得」開頭時，出現這些字多半是在聊天，不是要記事
+const CHATTY = /去|來|回|到|給|跟|一起|了|過|很|太|在|吧|貴|便宜|好吃|可以|不|沒|想|會|他|她|你|我/;
 
+/**
+ * 口語記事：
+ *   「記得帶大保鮮盒」「別忘了買牛奶、尿布」「記得繳停車費」
+ *   「帶保鮮盒、買麵、買晚餐」（每段各自的動詞；沒寫動詞的沿用前一段：「買麵、晚餐」）
+ * 問句、閒聊不觸發。
+ */
 export function parseNaturalNote(raw) {
-  const text = String(raw ?? "").replace(/\u3000/g, " ").trim();
-  if (!text || text.length > 40 || QUESTION.test(text) || /\n/.test(text)) return null;
-  for (const { re, category } of NATURAL) {
-    const m = text.match(re);
-    if (!m) continue;
-    const cat = category ?? (m[1] === "帶" ? "bring" : "buy");
-    const body = (category ? m[1] : m[2]).replace(TRAILING, "");
-    const items = body.split(/[、，,；;]+/)
-      .map((x) => x.trim().replace(/^(?:一個|一些|一點|一下|個|些|點)(?=.)/, ""))
-      .filter(Boolean).map((x) => x.slice(0, 30));
-    if (!items.length || items.some((x) => x.length < 1)) return null;
-    return { cmd: "noteAdd", category: cat, items, natural: true };
+  const text = String(raw ?? "").replace(/　/g, " ").trim();
+  if (!text || text.length > 60 || QUESTION.test(text) || /\n/.test(text)) return null;
+
+  let body = text;
+  let reminded = false;
+  const r = body.match(new RegExp(`^${REMIND}`));
+  if (r) {
+    reminded = true;
+    body = body.slice(r[0].length).replace(/^要\s*/, "");
   }
-  return null;
+  const lead = body.match(/^(?:要|順便|幫忙|幫我|麻煩)\s*(?=帶|買)/);
+  if (lead) {
+    reminded = true;
+    body = body.slice(lead[0].length);
+  }
+
+  const segs = body.split(/[、，,；;]+/).map((x) => x.replace(TRAILING, "").trim()).filter(Boolean);
+  if (!segs.length) return null;
+
+  const entries = [];
+  let category = null;
+  for (let seg of segs) {
+    const v = seg.match(/^(帶|買)\s*(.+)$/);
+    if (v) {
+      category = v[1] === "帶" ? "bring" : "buy";
+      seg = v[2];
+    } else if (!category) {
+      if (!reminded) return null; // 第一段沒有「帶 / 買」又沒有「記得」：不是記事
+      category = "todo";          // 「記得繳停車費」
+    }
+    seg = seg.replace(MEASURE, "").trim();
+    if (!seg) return null;
+    if (!reminded && (seg.length > 12 || CHATTY.test(seg))) return null;
+    entries.push({ category, text: seg.slice(0, 30) });
+  }
+  return { cmd: "noteAdd", entries, natural: true };
 }
 
 export const NOTE_CATEGORIES = [
@@ -168,7 +194,7 @@ export const HELP = [
   "",
   "📝 記事本",
   "▶ 記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費",
-  "  口語也行：記得帶大保鮮盒、別忘了買牛奶",
+  "  口語也行：帶保鮮盒、買麵、買晚餐／記得帶健保卡",
   "▶ 記事　（列出全部）",
   "▶ 完成 3　/　記事 清空 買",
   "",

@@ -215,16 +215,20 @@ test("notes: 列出、完成、清空、備註；閒聊不觸發", () => {
 });
 
 test("notes: 口語說法", () => {
-  const n = (t) => parseCommand(t);
-  assert.deepEqual(n("記得帶大保鮮盒"), { cmd: "noteAdd", category: "bring", items: ["大保鮮盒"], natural: true });
-  assert.deepEqual(n("記得要帶健保卡、抽血報告！"), { cmd: "noteAdd", category: "bring", items: ["健保卡", "抽血報告"], natural: true });
-  assert.deepEqual(n("別忘了買一些牛奶，尿布"), { cmd: "noteAdd", category: "buy", items: ["牛奶", "尿布"], natural: true });
-  assert.deepEqual(n("幫我買個便當"), { cmd: "noteAdd", category: "buy", items: ["便當"], natural: true });
-  assert.deepEqual(n("提醒大家記得帶口罩"), { cmd: "noteAdd", category: "bring", items: ["口罩"], natural: true });
-  assert.deepEqual(n("記得繳停車費喔"), { cmd: "noteAdd", category: "todo", items: ["繳停車費"], natural: true });
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(n("帶保鮮盒、買麵、買晚餐"), ["bring:保鮮盒", "buy:麵", "buy:晚餐"]);
+  assert.deepEqual(n("買麵、晚餐"), ["buy:麵", "buy:晚餐"]);
+  assert.deepEqual(n("記得帶大保鮮盒"), ["bring:大保鮮盒"]);
+  assert.deepEqual(n("記得要帶健保卡、抽血報告！"), ["bring:健保卡", "bring:抽血報告"]);
+  assert.deepEqual(n("別忘了買一些牛奶，尿布"), ["buy:牛奶", "buy:尿布"]);
+  assert.deepEqual(n("幫我買個便當"), ["buy:便當"]);
+  assert.deepEqual(n("提醒大家記得帶口罩"), ["bring:口罩"]);
+  assert.deepEqual(n("記得繳停車費喔"), ["todo:繳停車費"]);
+  assert.equal(parseCommand("帶水壺").natural, true);
 });
 test("notes: 口語說法不誤觸（問句、閒聊）", () => {
-  for (const t of ["今天要買什麼？", "要買嗎", "記得嗎", "我要買午餐", "帶小孩去公園", "記得那天很好玩嗎", "哈哈記得帶傘"]) {
+  for (const t of ["今天要買什麼？", "要買嗎", "記得嗎", "我要買午餐", "帶小孩去公園", "記得那天很好玩嗎", "哈哈記得帶傘",
+    "買了晚餐", "買房子好貴", "帶他去看醫生", "買麵、我晚點回去"]) {
     assert.equal(parseCommand(t), null, t);
   }
 });
