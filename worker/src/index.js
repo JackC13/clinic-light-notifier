@@ -2,7 +2,7 @@
 //   fetch     : 接收 LINE webhook，處理群組指令與按鈕
 //   scheduled : 每分鐘檢查到期的追蹤，抓燈號、推播
 
-import { parseCommand, HELP } from "./commands.js";
+import { parseCommand, HELP, NOTE_CATEGORIES } from "./commands.js";
 import { verifySignature, reply, push, textMsg, quickPostback, quickText } from "./line.js";
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
@@ -92,6 +92,11 @@ async function runCommand(cmd, ctx) {
     case "addUrl": return addByUrl(cmd, ctx);
     case "number": return answerNumber(cmd.number, ctx);
     case "postback": return onPostback(cmd.data, ctx);
+    case "notes": return notesReply(ctx);
+    case "noteAdd": return noteAdd(cmd, ctx);
+    case "noteDone": return noteDone(cmd, ctx);
+    case "noteClear": return noteClear(cmd, ctx);
+    case "label": return setLabel(cmd, ctx);
     case "diagnose": {
       const hosp = cmd.hosp ?? "CH";
       const ampm = cmd.ampm ?? currentAmpm(ctx.now);
@@ -364,6 +369,10 @@ async function addTracking(ctx, { hosp, ampm, sid, number, label = null }) {
       : "你目前：已報到");
   }
   if (c.byCheckin) lines.push("", "ℹ️ 此診依報到順序看診：會依「誰比你先報到」計算前面還有幾位，請盡早報到");
+  const { results: bring } = await ctx.env.DB.prepare("SELECT text FROM notes WHERE chat_id = ? AND category = 'bring' ORDER BY id")
+    .bind(ctx.chatId).all();
+  if (bring.length) lines.push("", `🎒 記得帶：${bring.map((n) => n.text).join("、")}`);
+  if (!label) lines.push("", `加備註：備註 ${row.id} 內容`);
   return lines.join("\n");
 }
 
@@ -412,6 +421,64 @@ async function cancel(cmd, ctx) {
   return `🗑 已取消 ${title(row)}，${row.my_number} 號`;
 }
 
+// ───────────────────────── 記事本 / 備註 ─────────────────────────
+
+const MAX_NOTES_PER_CHAT = 100;
+const catOf = (key) => NOTE_CATEGORIES.find((c) => c.key === key) ?? NOTE_CATEGORIES.at(-1);
+
+async function notesReply(ctx, header = null) {
+  const { results } = await ctx.env.DB.prepare("SELECT * FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all();
+  if (!results.length) {
+    return [header, "📝 記事本是空的。", "新增：記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費"].filter(Boolean).join("\n");
+  }
+  const lines = header ? [header, ""] : [];
+  lines.push(`📝 記事（${results.length}）`);
+  for (const c of NOTE_CATEGORIES) {
+    const items = results.filter((n) => n.category === c.key);
+    if (!items.length) continue;
+    lines.push("", `${c.icon} ${c.name}`, ...items.map((n) => `  #${n.id} ${n.text}`));
+  }
+  lines.push("", "完成：完成 編號（可多筆）");
+  const quick = results.slice(0, 13).map((n) => quickText(`完成 #${n.id} ${n.text}`, `完成 ${n.id}`));
+  return textMsg(lines.join("\n"), quick);
+}
+
+async function noteAdd(cmd, ctx) {
+  const db = ctx.env.DB;
+  const count = (await db.prepare("SELECT COUNT(*) AS n FROM notes WHERE chat_id = ?").bind(ctx.chatId).first()).n;
+  if (count + cmd.items.length > MAX_NOTES_PER_CHAT) return `❌ 記事最多 ${MAX_NOTES_PER_CHAT} 筆，請先完成一些`;
+  await db.batch(cmd.items.map((text) =>
+    db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)").bind(ctx.chatId, cmd.category, text, ctx.now)));
+  const c = catOf(cmd.category);
+  return notesReply(ctx, `${c.icon} 已記到「${c.name}」：${cmd.items.join("、")}`);
+}
+
+async function noteDone(cmd, ctx) {
+  const db = ctx.env.DB;
+  const marks = cmd.ids.map(() => "?").join(",");
+  const { results } = await db.prepare(`SELECT * FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...cmd.ids).all();
+  if (!results.length) return `找不到 ${cmd.ids.map((i) => `#${i}`).join("、")}，輸入「記事」查看編號`;
+  await db.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...cmd.ids).run();
+  return notesReply(ctx, `✔️ 完成：${results.map((n) => n.text).join("、")}`);
+}
+
+async function noteClear(cmd, ctx) {
+  const db = ctx.env.DB;
+  const r = cmd.category
+    ? await db.prepare("DELETE FROM notes WHERE chat_id = ? AND category = ?").bind(ctx.chatId, cmd.category).run()
+    : await db.prepare("DELETE FROM notes WHERE chat_id = ?").bind(ctx.chatId).run();
+  const what = cmd.category ? `「${catOf(cmd.category).name}」` : "全部記事";
+  return r.meta.changes ? `🗑 已清空${what}（${r.meta.changes} 筆）` : `${what}本來就是空的`;
+}
+
+async function setLabel(cmd, ctx) {
+  const row = await ctx.env.DB.prepare("SELECT * FROM trackings WHERE id = ? AND chat_id = ?").bind(cmd.id, ctx.chatId).first();
+  if (!row) return `找不到追蹤 #${cmd.id}，輸入「列表」查看編號`;
+  await ctx.env.DB.prepare("UPDATE trackings SET label = ? WHERE id = ?").bind(cmd.text, cmd.id).run();
+  const updated = { ...row, label: cmd.text };
+  return cmd.text ? `📝 已加上備註：${title(updated)}\n之後的通知都會顯示這段備註` : `已清除 #${cmd.id} 的備註`;
+}
+
 // ───────────────────────── 排程 ─────────────────────────
 
 export async function tick(env, now) {
@@ -434,6 +501,13 @@ export async function tick(env, now) {
     const chat = results[i].chat_id;
     byChat.set(chat, [...(byChat.get(chat) ?? []), ...s.value]);
   });
+  // 快輪到時（剩 5 以內、預計叫號、輪到了），附上「帶」的記事
+  for (const [chat, msgs] of byChat) {
+    if (!msgs.some((m) => /🟠|🔴|預計叫號|輪到了/.test(m))) continue;
+    const { results: bring } = await env.DB.prepare("SELECT text FROM notes WHERE chat_id = ? AND category = 'bring' ORDER BY id")
+      .bind(chat).all();
+    if (bring.length) msgs.push(`🎒 記得帶：${bring.map((n) => n.text).join("、")}`);
+  }
   await Promise.allSettled([...byChat].map(([chat, msgs]) => push(env, chat, msgs)));
 }
 

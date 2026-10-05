@@ -68,6 +68,39 @@ export function parseCommand(raw) {
 
   if (["說明", "help", "指令", "用法"].includes(key) && tokens.length === 0) return { cmd: "help" };
 
+  // ── 記事本 ──
+  // 手機上常不打空格：「記買尿布」「記帶 健保卡」
+  const glued = head.match(/^記(買|帶|做)(.*)$/);
+  if (glued) return parseCommand(`記 ${glued[1]} ${[glued[2], ...tokens].join(" ")}`);
+  if (["記", "記一下", "note"].includes(key)) {
+    if (!tokens.length) return { cmd: "notes" };
+    let category = NOTE_ALIASES[tokens[0]] ?? null;
+    const rest = (category ? tokens.slice(1) : tokens).join(" ");
+    category ??= "other";
+    const items = rest.split(/[、，,；;]+/).map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, 60));
+    if (!items.length) return { cmd: "usage", reason: "格式：記 買 尿布、牛奶（分類：買 / 帶 / 做，可省略）" };
+    return { cmd: "noteAdd", category, items };
+  }
+  if (["記事", "筆記", "notes"].includes(key)) {
+    if (!tokens.length) return { cmd: "notes" };
+    if (["清空", "清除"].includes(tokens[0])) {
+      const cat = tokens[1] ? NOTE_ALIASES[tokens[1]] : null;
+      if (tokens[1] && !cat) return { cmd: "usage", reason: "格式：記事 清空 [買 / 帶 / 做 / 其他]" };
+      return { cmd: "noteClear", category: cat };
+    }
+    return null;
+  }
+  if (["完成", "勾", "done"].includes(key)) {
+    const ids = tokens.join(" ").match(/\d+/g)?.map(Number) ?? [];
+    if (!ids.length) return { cmd: "usage", reason: "格式：完成 3（可一次多筆：完成 3 5 7）" };
+    return { cmd: "noteDone", ids };
+  }
+  if (["備註", "註記"].includes(key)) {
+    const m = tokens.join(" ").match(/^#?(\d+)\s*(.*)$/);
+    if (!m) return { cmd: "usage", reason: "格式：備註 3 帶健保卡和報告（不寫內容＝清除備註）" };
+    return { cmd: "label", id: parseInt(m[1], 10), text: m[2].trim().slice(0, 60) || null };
+  }
+
   if (["診斷", "debug"].includes(key)) {
     const terms = parseTerms(tokens);
     return { cmd: "diagnose", hosp: terms.hosp, ampm: terms.ampm };
@@ -75,6 +108,19 @@ export function parseCommand(raw) {
 
   return null;
 }
+
+export const NOTE_CATEGORIES = [
+  { key: "buy", name: "買", icon: "🛒" },
+  { key: "bring", name: "帶", icon: "🎒" },
+  { key: "todo", name: "做", icon: "✅" },
+  { key: "other", name: "其他", icon: "📌" },
+];
+const NOTE_ALIASES = {
+  買: "buy", 購買: "buy", 要買: "buy",
+  帶: "bring", 攜帶: "bring", 要帶: "bring",
+  做: "todo", 要做: "todo", 待辦: "todo", 辦: "todo", 要幹麻: "todo", 要幹嘛: "todo",
+  其他: "other",
+};
 
 export const HELP = [
   "📋 看診燈號提醒（臺大醫院）",
@@ -88,6 +134,13 @@ export const HELP = [
   "  只查目前燈號，不追蹤",
   "▶ 列表",
   "▶ 取消 3　/　取消 全部",
+  "▶ 備註 3 帶健保卡和報告",
+  "  把備註加在追蹤 #3，通知會一起顯示",
+  "",
+  "📝 記事本",
+  "▶ 記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費",
+  "▶ 記事　（列出全部）",
+  "▶ 完成 3　/　記事 清空 買",
   "",
   "剩 10、5、2 號與到號時通知，到號後自動移除。",
 ].join("\n");

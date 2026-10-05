@@ -197,3 +197,20 @@ test("detail: 一般診快輪到時提醒報到", () => {
   const r = onDetail(row({ my_number: 12, alerts: "" }), page({ 5: "oncall", 12: "notin" }, { current: 5, maxCalled: 5 }), false, cfg, NOW);
   assert.match(r.messages[0], /快輪到了.*還沒報到/);
 });
+
+// ── 記事本 / 備註 ──
+test("notes: 新增（分類、多項、黏在一起的寫法）", () => {
+  assert.deepEqual(parseCommand("記 買 尿布、牛奶，衛生紙"), { cmd: "noteAdd", category: "buy", items: ["尿布", "牛奶", "衛生紙"] });
+  assert.deepEqual(parseCommand("記帶健保卡"), { cmd: "noteAdd", category: "bring", items: ["健保卡"] });
+  assert.deepEqual(parseCommand("記做 繳停車費"), { cmd: "noteAdd", category: "todo", items: ["繳停車費"] });
+  assert.deepEqual(parseCommand("記 下次問醫生報告"), { cmd: "noteAdd", category: "other", items: ["下次問醫生報告"] });
+});
+test("notes: 列出、完成、清空、備註；閒聊不觸發", () => {
+  assert.deepEqual(parseCommand("記事"), { cmd: "notes" });
+  assert.deepEqual(parseCommand("完成 #3 5"), { cmd: "noteDone", ids: [3, 5] });
+  assert.deepEqual(parseCommand("記事 清空 買"), { cmd: "noteClear", category: "buy" });
+  assert.deepEqual(parseCommand("備註 3 帶健保卡"), { cmd: "label", id: 3, text: "帶健保卡" });
+  assert.deepEqual(parseCommand("備註 3"), { cmd: "label", id: 3, text: null });
+  assert.equal(parseCommand("記得帶傘喔"), null);
+  assert.equal(parseCommand("今天要買什麼"), null);
+});
