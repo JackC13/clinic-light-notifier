@@ -127,6 +127,8 @@ const TRAILING = /[\s!！。～~…]*(?:喔|哦|唷|呦|啊|呀|啦|欸|耶|嘿|
 const MEASURE = /^(?:一(?:個|些|點|下|包|盒|瓶|袋|條|罐|份|顆|張|件|雙|支|本|片|串|箱|組|台|套)|個|些)(?=.)/;
 // 沒有「記得」開頭時，出現這些字多半是在聊天，不是要記事
 const CHATTY = /去|來|回|到|給|跟|一起|了|過|很|太|在|吧|貴|便宜|好吃|可以|不|沒|想|會|他|她|你|我/;
+// 數量說法，判斷是不是閒聊時先拿掉（「很多愛」的「很」不算閒聊）
+const QTY = /^(?:很多|好多|超多|一堆|多一點|多點|一點點?|一些|幾(?:個|包|盒|瓶|條|罐|份|顆|張|件|雙|支|本|片))/;
 // 「學校要帶…」「明天得買…」：句首的場合
 const CONTEXT = /^([^\s]{1,6}?)\s*(?:要|需要|(?<![記曉懂覺])得)\s*(?=帶|買)/;
 const PRONOUN = /我|你|他|她|大家/;
@@ -199,7 +201,7 @@ export function parseNaturalNote(raw) {
       item = item.replace(MEASURE, "").trim();
       if (!item) return null;
       if (category !== "todo" && PEOPLE.test(item)) return null;
-      if (!sure && (item.length > 12 || CHATTY.test(item))) return null;
+      if (!sure && (item.length > 12 || CHATTY.test(item.replace(QTY, "")))) return null;
       const t = (tags.length ? `${item}（${tags.join("、")}）` : item).slice(0, 30);
       if (!entries.some((e) => e.category === category && e.text === t)) entries.push({ category, text: t });
     }
