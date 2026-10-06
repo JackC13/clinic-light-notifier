@@ -2,7 +2,7 @@
 //   fetch     : 接收 LINE webhook，處理群組指令與按鈕
 //   scheduled : 每分鐘檢查到期的追蹤，抓燈號、推播
 
-import { parseCommand, HELP, NOTE_CATEGORIES } from "./commands.js";
+import { parseCommand, HELP, NOTE_HELP, NOTE_CATEGORIES } from "./commands.js";
 import { verifySignature, reply, push, textMsg, quickPostback, quickText, getContent, imageMsg, quickCamera, quickCameraRoll } from "./line.js";
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
@@ -85,7 +85,11 @@ async function handleEvent(event, env, origin) {
 
 async function runCommand(cmd, ctx) {
   switch (cmd.cmd) {
-    case "help": return textMsg(HELP, [quickText("☰ 選單", "選單")]);
+    case "help": return textMsg(HELP, [quickText("☰ 選單", "選單"), quickText("📝 記事說明", "記事 說明")]);
+    case "noteHelp": return textMsg(NOTE_HELP, [
+      quickText("📝 看記事", "記事"), quickText("🛒 買什麼", "記事 買"), quickText("🎒 帶什麼", "記事 帶"),
+      quickText("✈️ 出國", "記事 出國"), quickText("☰ 選單", "選單"),
+    ]);
     case "menu": return menuCard(ctx);
     case "usage": return `❓ ${cmd.reason}\n\n輸入「說明」看完整用法`;
     case "list": return listReply(ctx);
@@ -452,6 +456,7 @@ const HINTS = {
     "　出國帶護照、轉接頭",
     "",
     "記下後可以按「📷 附圖」加照片",
+    "完整用法：記事 說明",
   ].join("\n")),
 };
 
@@ -529,6 +534,7 @@ async function menuCard(ctx) {
         { type: "separator", margin: "lg", color: THEME.blueSoft },
         section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
         row(msg("看記事", "記事", true), hint("記一筆", "note")),
+        row(msg("記事說明", "記事 說明")),
       ],
     },
     styles: { header: { separator: false } },

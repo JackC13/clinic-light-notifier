@@ -237,6 +237,9 @@ test("notes: 分類查詢", () => {
     assert.deepEqual(q(t), { cmd: "notes", category: c }, t);
   }
   assert.equal(q("記事本好用"), null);
+  assert.deepEqual(q("記事 說明"), { cmd: "noteHelp" });
+  assert.deepEqual(q("記事說明"), { cmd: "noteHelp" });
+  assert.deepEqual(q("記事本 用法"), { cmd: "noteHelp" });
   assert.equal(q("今天要買什麼"), null);
 });
 test("notes: 出國分類", () => {
