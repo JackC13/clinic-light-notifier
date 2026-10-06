@@ -226,6 +226,19 @@ test("notes: 口語說法", () => {
   assert.deepEqual(n("記得繳停車費喔"), ["todo:繳停車費"]);
   assert.equal(parseCommand("帶水壺").natural, true);
 });
+test("notes: 出國分類", () => {
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(parseCommand("記 出國 護照、轉接頭"), { cmd: "noteAdd", category: "trip", items: ["護照", "轉接頭"] });
+  assert.deepEqual(parseCommand("記出國護照"), { cmd: "noteAdd", category: "trip", items: ["護照"] });
+  assert.deepEqual(parseCommand("記事 清空 出國"), { cmd: "noteClear", category: "trip" });
+  assert.deepEqual(n("出國帶護照、轉接頭"), ["trip:護照", "trip:轉接頭"]);
+  assert.deepEqual(n("出國帶 護照跟網卡"), ["trip:護照", "trip:網卡"]);
+  assert.deepEqual(n("出國要帶感冒藥"), ["trip:感冒藥"]);
+  assert.deepEqual(n("記得出國帶護照"), ["trip:護照"]);
+  assert.deepEqual(n("帶護照出國"), ["trip:護照"]);
+  assert.deepEqual(n("出國買面膜、帶保鮮盒"), ["trip:買面膜", "bring:保鮮盒"]);
+  assert.equal(parseCommand("出國好累"), null);
+});
 test("notes: 口語說法（跟 / 去哪裡 / 某處要帶 / 多行）", () => {
   const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
   assert.deepEqual(n("帶月餅跟餅乾"), ["bring:月餅", "bring:餅乾"]);

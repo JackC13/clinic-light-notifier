@@ -71,7 +71,7 @@ export function parseCommand(raw) {
 
   // ── 記事本 ──
   // 手機上常不打空格：「記買尿布」「記帶 健保卡」
-  const glued = head.match(/^記(買|帶|做)(.*)$/);
+  const glued = head.match(/^記(買|帶|做|出國)(.*)$/);
   if (glued) return parseCommand(`記 ${glued[1]} ${[glued[2], ...tokens].join(" ")}`);
   if (["記", "記一下", "note"].includes(key)) {
     if (!tokens.length) return { cmd: "notes" };
@@ -163,6 +163,7 @@ export function parseNaturalNote(raw) {
 
   const entries = [];
   let category = null;
+  let prefix = "";                  // 「出國買…」記成出國分類的「買…」
   for (let seg of segs) {
     let sure = reminded;            // 這一段有明確的記事語氣
     const tags = [];
@@ -170,7 +171,14 @@ export function parseNaturalNote(raw) {
     if (lead) {
       sure = true;
       seg = seg.slice(lead[0].length);
-    } else {
+    }
+    const trip = seg.match(/^出國\s*(?:要|需要|得)?\s*(帶|買)\s*(.+)$/);
+    if (trip) {
+      sure = true;
+      category = "trip";
+      prefix = trip[1] === "買" ? "買" : "";
+      seg = trip[2];
+    } else if (!lead) {
       const c = seg.match(CONTEXT);
       if (c) {
         if (PRONOUN.test(c[1])) return null;   // 「我要買午餐」是在聊天
@@ -180,10 +188,20 @@ export function parseNaturalNote(raw) {
       }
     }
 
-    const v = seg.match(/^(帶|買)\s*(.+)$/);
+    const v = trip ? null : seg.match(/^(帶|買)\s*(.+)$/);
     if (v) {
       category = v[1] === "帶" ? "bring" : "buy";
+      prefix = "";
       seg = v[2];
+      const abroad = seg.match(/^(.+?)\s*出國$/);   // 「帶護照出國」
+      if (abroad) {
+        sure = true;
+        category = "trip";
+        prefix = v[1] === "買" ? "買" : "";
+        seg = abroad[1];
+      }
+    } else if (trip) {
+      // 已處理
     } else if (!category) {
       if (!sure) return null;  // 第一段沒有「帶 / 買」又沒有「記得」：不是記事
       category = "todo";       // 「記得繳停車費」
@@ -202,7 +220,7 @@ export function parseNaturalNote(raw) {
       if (!item) return null;
       if (category !== "todo" && PEOPLE.test(item)) return null;
       if (!sure && (item.length > 12 || CHATTY.test(item.replace(QTY, "")))) return null;
-      const t = (tags.length ? `${item}（${tags.join("、")}）` : item).slice(0, 30);
+      const t = (prefix + (tags.length ? `${item}（${tags.join("、")}）` : item)).slice(0, 30);
       if (!entries.some((e) => e.category === category && e.text === t)) entries.push({ category, text: t });
     }
   }
@@ -213,12 +231,14 @@ export const NOTE_CATEGORIES = [
   { key: "buy", name: "買", icon: "🛒" },
   { key: "bring", name: "帶", icon: "🎒" },
   { key: "todo", name: "做", icon: "✅" },
+  { key: "trip", name: "出國", icon: "✈️" },
   { key: "other", name: "其他", icon: "📌" },
 ];
 const NOTE_ALIASES = {
   買: "buy", 購買: "buy", 要買: "buy",
   帶: "bring", 攜帶: "bring", 要帶: "bring",
   做: "todo", 要做: "todo", 待辦: "todo", 辦: "todo", 要幹麻: "todo", 要幹嘛: "todo",
+  出國: "trip", 出國帶: "trip", 出國要帶: "trip",
   其他: "other",
 };
 
@@ -241,6 +261,7 @@ export const HELP = [
   "📝 記事本",
   "▶ 記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費",
   "  口語也行：帶保鮮盒、買麵、買晚餐／學校要帶濕紙巾",
+  "▶ 出國帶 護照、轉接頭　（✈️ 出國分類）",
   "▶ 記事　（列出全部）",
   "▶ 完成 3　/　記事 清空 買",
   "▶ 附圖 3（再傳照片）／看圖 3",
