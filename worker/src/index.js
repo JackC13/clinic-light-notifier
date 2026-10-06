@@ -105,6 +105,7 @@ async function runCommand(cmd, ctx) {
     case "noteAdd": return noteAdd(cmd, ctx);
     case "noteDone": return noteDone(cmd, ctx);
     case "noteClear": return noteClear(cmd, ctx);
+    case "noteEdit": return noteEdit(cmd, ctx);
     case "label": return setLabel(cmd, ctx);
     case "remind": return remind(cmd, ctx);
     case "remindList": return remindList(ctx);
@@ -575,7 +576,7 @@ async function notesReply(ctx, header = null, extraQuick = [], category = null) 
     if (!only) lines.push("", `${c.icon} ${c.name}`);
     lines.push(...items.map((n) => `${only ? "" : "  "}#${n.id} ${n.text}${n.image_key ? " 📷" : ""}${dueMark(n.id)}`));
   }
-  lines.push("", "完成：完成 編號（可多筆）");
+  lines.push("", "完成：完成 編號（可多筆）", "修改：改 編號 新內容");
   if (only && all.length > results.length) lines.push(`其他分類還有 ${all.length - results.length} 筆，輸入「記事」看全部`);
   const quick = [
     ...extraQuick,
@@ -632,6 +633,21 @@ async function noteDone(cmd, ctx) {
   return notesReply(ctx, `✔️ 完成：${results.map((n) => n.text).join("、")}`);
 }
 
+async function noteEdit(cmd, ctx) {
+  const db = ctx.env.DB;
+  const note = await db.prepare("SELECT * FROM notes WHERE id = ? AND chat_id = ?").bind(cmd.id, ctx.chatId).first();
+  if (!note) return `找不到記事 #${cmd.id}，輸入「記事」查看編號`;
+  const category = cmd.category ?? note.category;
+  const text = cmd.text ?? note.text;
+  if (category === note.category && text === note.text) return "內容一樣，沒有修改";
+  await db.prepare("UPDATE notes SET category = ?, text = ? WHERE id = ?").bind(category, text, note.id).run();
+  const from = catOf(note.category), to = catOf(category);
+  const head = category === note.category
+    ? `✏️ 已修改 #${note.id}：${note.text} → ${text}`
+    : `✏️ 已修改 #${note.id}：${from.icon} ${from.name}「${note.text}」→ ${to.icon} ${to.name}「${text}」`;
+  return notesReply(ctx, head, [], category);
+}
+
 async function noteClear(cmd, ctx) {
   const db = ctx.env.DB;
   const { results: withImg } = cmd.category
@@ -674,7 +690,10 @@ async function remindList(ctx) {
     .bind(ctx.chatId).all();
   if (!results.length) return textMsg("⏰ 目前沒有提醒。\n新增：提醒 明天 8點 帶傘　/　明天帶月餅（記事＋提醒）");
   const lines = [`⏰ 提醒（${results.length}）`, ""];
-  for (const r of results) lines.push(`#${r.id} ${formatWhen(r.due_at, ctx.now)}　${r.note_ids ? "📝 " : ""}${r.text}`);
+  for (const r of results) {
+    if (r.note_ids) r.text = (await noteSummary(ctx.env, r.chat_id, r.note_ids)) ?? "（記事都完成了，不會提醒）";
+    lines.push(`#${r.id} ${formatWhen(r.due_at, ctx.now)}　${r.note_ids ? "📝 " : ""}${r.text}`);
+  }
   lines.push("", "取消：取消提醒 編號");
   return textMsg(lines.join("\n"), results.slice(0, 13).map((r) => quickText(`取消 #${r.id} ${r.text}`, `取消提醒 ${r.id}`)));
 }
@@ -687,6 +706,21 @@ async function remindCancel(id, ctx) {
   return `🗑 已取消提醒：${formatWhen(r.due_at, ctx.now)} ${r.text}${r.note_ids ? "\n（記事還在，要刪記事請用「完成」）" : ""}`;
 }
 
+/** 連結的記事（還沒完成的）整理成「🎒 帶：月餅、餅乾」；都完成了回傳 null */
+async function noteSummary(env, chatId, noteIds) {
+  const ids = String(noteIds).split(",").map(Number).filter(Number.isInteger);
+  if (!ids.length) return null;
+  const marks = ids.map(() => "?").join(",");
+  const { results: notes } = await env.DB.prepare(`SELECT category, text FROM notes WHERE chat_id = ? AND id IN (${marks}) ORDER BY id`)
+    .bind(chatId, ...ids).all();
+  if (!notes.length) return null;
+  return NOTE_CATEGORIES
+    .map((c) => ({ c, t: notes.filter((n) => n.category === c.key).map((n) => n.text) }))
+    .filter((x) => x.t.length)
+    .map(({ c, t }) => `${c.icon} ${c.name}：${t.join("、")}`)
+    .join("｜");
+}
+
 /** 到期的提醒 → { chatId: [訊息] }；連結的記事都完成了就不提醒 */
 async function dueReminders(env, now) {
   const { results } = await env.DB.prepare("SELECT * FROM reminders WHERE due_at <= ? ORDER BY due_at LIMIT 50").bind(now).all();
@@ -695,17 +729,8 @@ async function dueReminders(env, now) {
   for (const r of results) {
     let text = r.text;
     if (r.note_ids) {
-      const ids = r.note_ids.split(",").map(Number).filter(Number.isInteger);
-      const marks = ids.map(() => "?").join(",");
-      const { results: notes } = ids.length
-        ? await env.DB.prepare(`SELECT category, text FROM notes WHERE chat_id = ? AND id IN (${marks}) ORDER BY id`).bind(r.chat_id, ...ids).all()
-        : { results: [] };
-      if (!notes.length) continue;
-      text = NOTE_CATEGORIES
-        .map((c) => ({ c, t: notes.filter((n) => n.category === c.key).map((n) => n.text) }))
-        .filter((x) => x.t.length)
-        .map(({ c, t }) => `${c.icon} ${c.name}：${t.join("、")}`)
-        .join("｜");
+      text = await noteSummary(env, r.chat_id, r.note_ids);
+      if (!text) continue;
     }
     out.set(r.chat_id, [...(out.get(r.chat_id) ?? []), `⏰ 提醒：${text}`]);
   }

@@ -335,3 +335,14 @@ test("remind: 指令", () => {
   assert.equal(p("明天好熱"), null);
   assert.equal(p("明天要帶什麼"), null);
 });
+
+test("notes: 修改", () => {
+  assert.deepEqual(parseCommand("改 3 大保鮮盒"), { cmd: "noteEdit", id: 3, category: null, text: "大保鮮盒" });
+  assert.deepEqual(parseCommand("修改 #3 成 大保鮮盒"), { cmd: "noteEdit", id: 3, category: null, text: "大保鮮盒" });
+  assert.deepEqual(parseCommand("3 改成 大保鮮盒"), { cmd: "noteEdit", id: 3, category: null, text: "大保鮮盒" });
+  assert.deepEqual(parseCommand("改3 買 牛奶"), { cmd: "noteEdit", id: 3, category: "buy", text: "牛奶" });
+  assert.deepEqual(parseCommand("改 3 出國"), { cmd: "noteEdit", id: 3, category: "trip", text: null });
+  assert.equal(parseCommand("改 3").cmd, "usage");
+  assert.equal(parseCommand("改").cmd, "usage");
+  assert.equal(parseCommand("改天再說"), null);
+});

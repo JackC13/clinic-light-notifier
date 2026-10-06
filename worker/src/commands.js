@@ -111,6 +111,18 @@ export function parseCommand(raw, now = Date.now()) {
     if (!ids.length) return { cmd: "usage", reason: "格式：完成 3（可一次多筆：完成 3 5 7）" };
     return { cmd: "noteDone", ids };
   }
+  // 改 3 大保鮮盒 / 改 3 買 牛奶 / 改 3 出國 / 3 改成 大保鮮盒
+  const ed = text.match(/^(?:改|修改|編輯|更改)\s*#?(\d+)\s*(?:改成|改為|成|為|[:：])?\s*(.*)$/) ?? text.match(/^#?(\d+)\s*(?:改成|改為)\s*(.*)$/);
+  if (ed) {
+    const id = parseInt(ed[1], 10);
+    const parts = ed[2].trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return { cmd: "usage", reason: `格式：改 ${id} 新內容（也可以換分類：改 ${id} 買 牛奶、改 ${id} 出國）` };
+    const cat = NOTE_ALIASES[parts[0]] ?? null;
+    const rest = (cat ? parts.slice(1) : parts).join(" ").slice(0, 60);
+    return { cmd: "noteEdit", id, category: cat, text: rest || null };
+  }
+  if (/^(?:改|修改|編輯|更改)$/.test(text)) return { cmd: "usage", reason: "格式：改 編號 新內容（例：改 3 大保鮮盒）" };
+
   if (["附圖", "加圖"].includes(key)) {
     const id = tokens.join("").match(/\d+/)?.[0];
     return id ? { cmd: "photoAsk", id: parseInt(id, 10) } : { cmd: "usage", reason: "格式：附圖 3（再傳一張照片）" };
@@ -327,6 +339,10 @@ export const NOTE_HELP = [
   "▶ 週五晚上8點 買牛奶　（沒寫時間＝當天早上 8 點）",
   "▶ 提醒列表　/　取消提醒 3",
   "",
+  "【修改】",
+  "▶ 改 3 大保鮮盒　/　3 改成 大保鮮盒",
+  "▶ 改 3 買 牛奶　（換分類＋內容）　/　改 3 出國（只換分類）",
+  "",
   "【完成、清空】",
   "▶ 完成 3　/　完成 3 5 7",
   "▶ 記事 清空 買　/　記事 清空（全部）",
@@ -363,6 +379,7 @@ export const HELP = [
   "▶ 記事 買　/　買什麼　/　要帶什麼　/　出國帶什麼",
   "  只看某一類",
   "▶ 完成 3　/　記事 清空 買",
+  "▶ 改 3 大保鮮盒　（修改記事）",
   "▶ 附圖 3（再傳照片）／看圖 3",
   "▶ 記事 說明　（記事本完整用法）",
   "",
