@@ -10,6 +10,7 @@
 // 不是指令的訊息回傳 null（群組閒聊不理會）
 
 import { hospitalByAlias, ampmByAlias } from "./ntuh.js";
+import { parseWhen } from "./when.js";
 
 const URL_RE = /https?:\/\/[^\s<>"'，。]+/i;
 const NUM_RE = /^(\d{1,4})號?$/;
@@ -29,7 +30,7 @@ function parseTerms(tokens) {
   return { number, hosp, ampm, doctor };
 }
 
-export function parseCommand(raw) {
+export function parseCommand(raw, now = Date.now()) {
   const text = String(raw ?? "").replace(/　/g, " ").trim();
   const [head = "", ...tokens] = text.split(/\s+/);
   const key = head.toLowerCase();
@@ -58,6 +59,11 @@ export function parseCommand(raw) {
   }
 
   if (["列表", "清單", "list"].includes(key) && tokens.length === 0) return { cmd: "list" };
+
+  // ── 提醒 ──
+  if (/^(?:提醒|看提醒|提醒列表|提醒清單|列出提醒)$/.test(text)) return { cmd: "remindList" };
+  const rc = text.match(/^(?:取消|刪除)\s*提醒\s*#?(\d+)$/);
+  if (rc) return { cmd: "remindCancel", id: parseInt(rc[1], 10) };
 
   if (["取消", "刪除", "cancel", "停止"].includes(key)) {
     const arg = tokens.join("").replace(/^#/, "");
@@ -124,7 +130,42 @@ export function parseCommand(raw) {
     return { cmd: "diagnose", hosp: terms.hosp, ampm: terms.ampm };
   }
 
-  return parseNaturalNote(text);
+  return parseRemind(text, now) ?? noteWithDate(text, now) ?? parseNaturalNote(text);
+}
+
+// ── 提醒：「提醒 明天 8點 帶傘」「明天晚上提醒我繳費」「30分鐘後提醒 關火」 ──
+const REMIND_HEAD = /^提醒(?:我|我們|大家|一下)?\s*/;
+
+function parseRemind(text, now) {
+  let s = text;
+  const explicit = REMIND_HEAD.test(s);
+  if (explicit) s = s.replace(REMIND_HEAD, "");
+  const w = parseWhen(s, now);
+  if (!w) {
+    if (!explicit || !s) return null;
+    // 「提醒大家記得帶口罩」沒有時間 → 當一般記事
+    return parseNaturalNote(text) ? null : { cmd: "usage", reason: "格式：提醒 明天 8點 帶傘（日期、時間寫在前面）" };
+  }
+  let rest = w.rest;
+  if (!explicit) {
+    const p = rest.match(REMIND_HEAD);
+    if (!p) return null;                 // 「明天帶月餅」→ 交給帶日期的記事
+    rest = rest.slice(p[0].length);
+  }
+  rest = rest.replace(REMIND_HEAD, "").replace(/[\s。!！~～]+$/, "").trim();
+  if (!rest) return { cmd: "usage", reason: "要提醒什麼呢？例：提醒 明天 8點 帶傘" };
+  if (QUESTION.test(rest)) return null;
+  return { cmd: "remind", at: w.at, hasTime: w.hasTime, text: rest.slice(0, 60) };
+}
+
+// ── 帶日期的記事：「明天帶月餅」「10/8 學校要帶濕紙巾」「記得週五買牛奶」→ 記事 + 當天提醒 ──
+function noteWithDate(text, now) {
+  const pre = text.match(new RegExp(`^${REMIND}`))?.[0] ?? "";
+  const w = parseWhen(text.slice(pre.length), now);
+  if (!w || !w.rest) return null;
+  const note = parseNaturalNote(pre + w.rest);
+  if (!note) return null;
+  return { ...note, remindAt: w.at, remindHasTime: w.hasTime };
 }
 
 // ── 口語記事：「記得帶大保鮮盒」「別忘了買牛奶、尿布」「記得繳停車費」 ──
@@ -281,6 +322,11 @@ export const NOTE_HELP = [
   "▶ 記事 買／買什麼／要帶什麼／出國帶什麼／記事 做",
   "  只看某一類",
   "",
+  "【日期提醒】前面加日期就會到時提醒",
+  "▶ 明天帶月餅　/　10/8 學校要帶濕紙巾",
+  "▶ 週五晚上8點 買牛奶　（沒寫時間＝當天早上 8 點）",
+  "▶ 提醒列表　/　取消提醒 3",
+  "",
   "【完成、清空】",
   "▶ 完成 3　/　完成 3 5 7",
   "▶ 記事 清空 買　/　記事 清空（全部）",
@@ -319,6 +365,12 @@ export const HELP = [
   "▶ 完成 3　/　記事 清空 買",
   "▶ 附圖 3（再傳照片）／看圖 3",
   "▶ 記事 說明　（記事本完整用法）",
+  "",
+  "⏰ 提醒",
+  "▶ 提醒 明天 8點 帶傘　/　提醒 10/8 繳費",
+  "▶ 30分鐘後提醒 關火　/　週五晚上提醒我倒垃圾",
+  "▶ 明天帶月餅　（記事＋當天早上 8 點提醒）",
+  "▶ 提醒列表　/　取消提醒 3",
   "",
   "剩 10、5、2 號與到號時通知，到號後自動移除。",
 ].join("\n");

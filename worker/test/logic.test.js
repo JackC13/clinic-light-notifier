@@ -260,7 +260,8 @@ test("notes: 口語說法（跟 / 去哪裡 / 某處要帶 / 多行）", () => {
   assert.deepEqual(n("帶月餅跟餅乾"), ["bring:月餅", "bring:餅乾"]);
   assert.deepEqual(n("帶一包濕紙巾去學校"), ["bring:濕紙巾（學校）"]);
   assert.deepEqual(n("學校要帶一包濕紙巾"), ["bring:濕紙巾（學校）"]);
-  assert.deepEqual(n("明天要買牛奶和吐司"), ["buy:牛奶（明天）", "buy:吐司（明天）"]);
+  assert.deepEqual(n("明天要買牛奶和吐司"), ["buy:牛奶", "buy:吐司"]);
+  assert.ok(parseCommand("明天要買牛奶和吐司").remindAt, "帶日期的記事會設提醒");
   assert.deepEqual(n("帶健保卡到醫院"), ["bring:健保卡（醫院）"]);
   assert.deepEqual(n("帶媽媽手冊"), ["bring:媽媽手冊"]);
   assert.deepEqual(n("買點心"), ["buy:點心"]);
@@ -287,4 +288,50 @@ test("menu: 選單指令", () => {
   assert.deepEqual(parseCommand("選單"), { cmd: "menu" });
   assert.deepEqual(parseCommand("menu"), { cmd: "menu" });
   assert.equal(parseCommand("選單好醜"), null);
+});
+
+// ── 日期 / 提醒 ──
+import { parseWhen, formatWhen } from "../src/when.js";
+const T = Date.UTC(2026, 9, 6, 6, 20); // 台北 2026/10/6（二）14:20
+const W = (t) => { const r = parseWhen(t, T); return r && `${formatWhen(r.at, T)}|${r.rest}`; };
+
+test("when: 日期與時間", () => {
+  assert.equal(W("明天帶月餅"), "明天 10/7（三）08:00|帶月餅");
+  assert.equal(W("10/8 帶月餅"), "後天 10/8（四）08:00|帶月餅");
+  assert.equal(W("10月8號 繳費"), "後天 10/8（四）08:00|繳費");
+  assert.equal(W("5號 繳費"), "11/5（四）08:00|繳費");
+  assert.equal(W("週五 開會"), "10/9（五）08:00|開會");
+  assert.equal(W("週二 開會"), "10/13（二）08:00|開會");
+  assert.equal(W("週二 下午5點 開會"), "今天 10/6（二）17:00|開會");
+  assert.equal(W("下週一早上 帶便當"), "10/12（一）08:00|帶便當");
+  assert.equal(W("今晚 繳費"), "今天 10/6（二）20:00|繳費");
+  assert.equal(W("明天晚上8點半 吃藥"), "明天 10/7（三）20:30|吃藥");
+  assert.equal(W("18:30 關火"), "今天 10/6（二）18:30|關火");
+  assert.equal(W("8點 關火"), "今天 10/6（二）20:00|關火");
+  assert.equal(W("晚上十點 倒垃圾"), "今天 10/6（二）22:00|倒垃圾");
+  assert.equal(W("30分鐘後 關火"), "今天 10/6（二）14:50|關火");
+  assert.equal(W("半小時後 關火"), "今天 10/6（二）14:50|關火");
+  assert.equal(W("1/2 繳費"), "1/2（六）08:00|繳費");
+  assert.equal(W("帶傘"), null);
+  assert.equal(W("2/30 x"), null);
+});
+
+test("remind: 指令", () => {
+  const p = (t) => parseCommand(t, T);
+  assert.deepEqual(p("提醒 明天 8點 帶傘"), { cmd: "remind", at: Date.UTC(2026, 9, 7, 0, 0), hasTime: true, text: "帶傘" });
+  assert.equal(p("明天晚上提醒我繳費").text, "繳費");
+  assert.equal(p("30分鐘後提醒 關火").at, T + 30 * 60_000);
+  assert.equal(p("10/8 提醒 帶月餅").cmd, "remind");
+  assert.deepEqual(p("提醒列表"), { cmd: "remindList" });
+  assert.deepEqual(p("提醒"), { cmd: "remindList" });
+  assert.deepEqual(p("取消提醒 3"), { cmd: "remindCancel", id: 3 });
+  assert.deepEqual(p("取消 提醒 #3"), { cmd: "remindCancel", id: 3 });
+  assert.equal(p("提醒大家記得帶口罩").cmd, "noteAdd");   // 沒有時間 → 一般記事
+  assert.equal(p("提醒我 明天").cmd, "usage");
+  const d = p("10/8 學校要帶濕紙巾");
+  assert.equal(d.cmd, "noteAdd");
+  assert.equal(d.entries[0].text, "濕紙巾（學校）");
+  assert.equal(d.remindAt, Date.UTC(2026, 9, 8, 0, 0));
+  assert.equal(p("明天好熱"), null);
+  assert.equal(p("明天要帶什麼"), null);
 });

@@ -8,6 +8,7 @@ import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
 import { loadConfig, onReading, onFailure, onDetail, isExpired, title, CHECKIN_NOTE } from "./monitor.js";
+import { formatWhen } from "./when.js";
 
 const MAX_ACTIVE_PER_CHAT = 10;
 const MAX_PER_TICK = 30;
@@ -105,6 +106,9 @@ async function runCommand(cmd, ctx) {
     case "noteDone": return noteDone(cmd, ctx);
     case "noteClear": return noteClear(cmd, ctx);
     case "label": return setLabel(cmd, ctx);
+    case "remind": return remind(cmd, ctx);
+    case "remindList": return remindList(ctx);
+    case "remindCancel": return remindCancel(cmd.id, ctx);
     case "photoAsk": return photoAsk(cmd.id, ctx);
     case "photoShow": return photoShow(cmd.id, ctx);
     case "image": return onImage(cmd, ctx);
@@ -454,6 +458,7 @@ const HINTS = {
     "　記得帶健保卡",
     "　記得繳停車費",
     "　出國帶護照、轉接頭",
+    "　明天帶月餅（前面加日期＝到時提醒）",
     "",
     "記下後可以按「📷 附圖」加照片",
     "完整用法：記事 說明",
@@ -534,7 +539,7 @@ async function menuCard(ctx) {
         { type: "separator", margin: "lg", color: THEME.blueSoft },
         section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
         row(msg("看記事", "記事", true), hint("記一筆", "note")),
-        row(msg("記事說明", "記事 說明")),
+        row(msg("⏰ 提醒列表", "提醒列表"), msg("記事說明", "記事 說明")),
       ],
     },
     styles: { header: { separator: false } },
@@ -550,6 +555,11 @@ const catOf = (key) => NOTE_CATEGORIES.find((c) => c.key === key) ?? NOTE_CATEGO
 async function notesReply(ctx, header = null, extraQuick = [], category = null) {
   const { results: all } = await ctx.env.DB.prepare("SELECT * FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all();
   const only = category ? catOf(category) : null;
+  const { results: rems } = await ctx.env.DB.prepare("SELECT due_at, note_ids FROM reminders WHERE chat_id = ? AND note_ids IS NOT NULL")
+    .bind(ctx.chatId).all();
+  const due = new Map();
+  for (const r of rems) for (const id of r.note_ids.split(",")) if (!due.has(+id) || due.get(+id) > r.due_at) due.set(+id, r.due_at);
+  const dueMark = (id) => (due.has(id) ? ` ⏰${formatWhen(due.get(id), ctx.now).replace(/^(?:今天|明天|後天) /, "").replace(/（.）/, " ")}` : "");
   const results = only ? all.filter((n) => n.category === only.key) : all;
   if (!results.length) {
     const empty = only ? `${only.icon} ${only.name}：目前沒有記事。` : "📝 記事本是空的。";
@@ -563,7 +573,7 @@ async function notesReply(ctx, header = null, extraQuick = [], category = null) 
     const items = results.filter((n) => n.category === c.key);
     if (!items.length) continue;
     if (!only) lines.push("", `${c.icon} ${c.name}`);
-    lines.push(...items.map((n) => `${only ? "" : "  "}#${n.id} ${n.text}${n.image_key ? " 📷" : ""}`));
+    lines.push(...items.map((n) => `${only ? "" : "  "}#${n.id} ${n.text}${n.image_key ? " 📷" : ""}${dueMark(n.id)}`));
   }
   lines.push("", "完成：完成 編號（可多筆）");
   if (only && all.length > results.length) lines.push(`其他分類還有 ${all.length - results.length} 筆，輸入「記事」看全部`);
@@ -588,8 +598,17 @@ async function noteAdd(cmd, ctx) {
     .map((c) => ({ c, texts: entries.filter((e) => e.category === c.key).map((e) => e.text) }))
     .filter((x) => x.texts.length)
     .map(({ c, texts }) => `${c.icon} ${c.name}：${texts.join("、")}`);
-  const head = `已記下 ${parts.join("｜")}`;
+  let head = `已記下 ${parts.join("｜")}`;
   const ids = results.map((r) => r.meta.last_row_id);
+  if (cmd.remindAt) {
+    if (cmd.remindAt <= ctx.now + 30_000) {
+      head += `\n（${formatWhen(cmd.remindAt, ctx.now)} 已經過了，沒有設提醒）`;
+    } else {
+      await db.prepare("INSERT INTO reminders (chat_id, text, due_at, note_ids, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(ctx.chatId, parts.join("｜"), cmd.remindAt, ids.join(","), ctx.userId, ctx.now).run();
+      head += `\n⏰ ${formatWhen(cmd.remindAt, ctx.now)} 提醒`;
+    }
+  }
   // 附圖按鈕：一次記多項時，每項各一個（快速回覆最多 13 個）
   const photoQuick = ids.slice(0, 8).map((id, i) =>
     quickPostback(ids.length > 1 ? `📷 ${entries[i].text}` : "📷 附圖", { a: "photo", id }, `附圖給「${entries[i].text}」`));
@@ -624,6 +643,75 @@ async function noteClear(cmd, ctx) {
     : await db.prepare("DELETE FROM notes WHERE chat_id = ?").bind(ctx.chatId).run();
   const what = cmd.category ? `「${catOf(cmd.category).name}」` : "全部記事";
   return r.meta.changes ? `🗑 已清空${what}（${r.meta.changes} 筆）` : `${what}本來就是空的`;
+}
+
+// ── 提醒 ──
+
+const MAX_REMINDERS_PER_CHAT = 50;
+const MAX_REMIND_AHEAD = 400 * 86400_000;
+
+async function remind(cmd, ctx) {
+  const db = ctx.env.DB;
+  if (cmd.at <= ctx.now + 30_000) {
+    return cmd.hasTime
+      ? `❌ ${formatWhen(cmd.at, ctx.now)} 已經過了`
+      : `❌ ${formatWhen(cmd.at, ctx.now)} 已經過了，請加上時間（例：提醒 今天 18:00 ${cmd.text}）`;
+  }
+  if (cmd.at > ctx.now + MAX_REMIND_AHEAD) return "❌ 最多只能設一年內的提醒";
+  const n = (await db.prepare("SELECT COUNT(*) AS n FROM reminders WHERE chat_id = ?").bind(ctx.chatId).first()).n;
+  if (n >= MAX_REMINDERS_PER_CHAT) return `❌ 提醒最多 ${MAX_REMINDERS_PER_CHAT} 筆，請先取消一些`;
+  const r = await db.prepare("INSERT INTO reminders (chat_id, text, due_at, note_ids, created_by, created_at) VALUES (?, ?, ?, NULL, ?, ?)")
+    .bind(ctx.chatId, cmd.text, cmd.at, ctx.userId, ctx.now).run();
+  const id = r.meta.last_row_id;
+  return textMsg(`⏰ 好的，${formatWhen(cmd.at, ctx.now)} 提醒：${cmd.text}`, [
+    quickText("↩️ 取消這個提醒", `取消提醒 ${id}`),
+    quickText("⏰ 提醒列表", "提醒列表"),
+  ]);
+}
+
+async function remindList(ctx) {
+  const { results } = await ctx.env.DB.prepare("SELECT * FROM reminders WHERE chat_id = ? ORDER BY due_at LIMIT 30")
+    .bind(ctx.chatId).all();
+  if (!results.length) return textMsg("⏰ 目前沒有提醒。\n新增：提醒 明天 8點 帶傘　/　明天帶月餅（記事＋提醒）");
+  const lines = [`⏰ 提醒（${results.length}）`, ""];
+  for (const r of results) lines.push(`#${r.id} ${formatWhen(r.due_at, ctx.now)}　${r.note_ids ? "📝 " : ""}${r.text}`);
+  lines.push("", "取消：取消提醒 編號");
+  return textMsg(lines.join("\n"), results.slice(0, 13).map((r) => quickText(`取消 #${r.id} ${r.text}`, `取消提醒 ${r.id}`)));
+}
+
+async function remindCancel(id, ctx) {
+  const db = ctx.env.DB;
+  const r = await db.prepare("SELECT * FROM reminders WHERE id = ? AND chat_id = ?").bind(id, ctx.chatId).first();
+  if (!r) return `找不到提醒 #${id}，輸入「提醒列表」查看編號`;
+  await db.prepare("DELETE FROM reminders WHERE id = ?").bind(id).run();
+  return `🗑 已取消提醒：${formatWhen(r.due_at, ctx.now)} ${r.text}${r.note_ids ? "\n（記事還在，要刪記事請用「完成」）" : ""}`;
+}
+
+/** 到期的提醒 → { chatId: [訊息] }；連結的記事都完成了就不提醒 */
+async function dueReminders(env, now) {
+  const { results } = await env.DB.prepare("SELECT * FROM reminders WHERE due_at <= ? ORDER BY due_at LIMIT 50").bind(now).all();
+  const out = new Map();
+  if (!results.length) return out;
+  for (const r of results) {
+    let text = r.text;
+    if (r.note_ids) {
+      const ids = r.note_ids.split(",").map(Number).filter(Number.isInteger);
+      const marks = ids.map(() => "?").join(",");
+      const { results: notes } = ids.length
+        ? await env.DB.prepare(`SELECT category, text FROM notes WHERE chat_id = ? AND id IN (${marks}) ORDER BY id`).bind(r.chat_id, ...ids).all()
+        : { results: [] };
+      if (!notes.length) continue;
+      text = NOTE_CATEGORIES
+        .map((c) => ({ c, t: notes.filter((n) => n.category === c.key).map((n) => n.text) }))
+        .filter((x) => x.t.length)
+        .map(({ c, t }) => `${c.icon} ${c.name}：${t.join("、")}`)
+        .join("｜");
+    }
+    out.set(r.chat_id, [...(out.get(r.chat_id) ?? []), `⏰ 提醒：${text}`]);
+  }
+  const marks = results.map(() => "?").join(",");
+  await env.DB.prepare(`DELETE FROM reminders WHERE id IN (${marks})`).bind(...results.map((r) => r.id)).run();
+  return out;
 }
 
 // ── 記事附圖 ──
@@ -703,17 +791,23 @@ export async function tick(env, now) {
   const cfg = loadConfig(env);
   await env.DB.prepare("DELETE FROM pending WHERE expires_at < ?").bind(now).run();
   await env.DB.prepare("DELETE FROM pending_photo WHERE expires_at < ?").bind(now).run();
+  // 到期的提醒
+  let byChat = new Map();
+  try {
+    byChat = await dueReminders(env, now);
+  } catch (e) {
+    console.error("reminders:", e);
+  }
+
   const { results } = await env.DB.prepare(
     "SELECT * FROM trackings WHERE next_check_at <= ? ORDER BY next_check_at LIMIT ?",
   ).bind(now, MAX_PER_TICK).all();
-  if (!results.length) return;
 
   // 同院區同時段只抓一次列表
   const ctx = { env, now, tables: new Map() };
   const settled = await Promise.allSettled(results.map((row) => checkOne(row, cfg, ctx)));
 
   // 同一個群組在同一分鐘的通知合併成一則推播，節省額度
-  const byChat = new Map();
   settled.forEach((s, i) => {
     if (s.status === "rejected") return console.error(`tracking #${results[i].id}:`, s.reason);
     if (!s.value.length) return;
