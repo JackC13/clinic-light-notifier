@@ -96,7 +96,7 @@ async function runCommand(cmd, ctx) {
     case "addUrl": return addByUrl(cmd, ctx);
     case "number": return answerNumber(cmd.number, ctx);
     case "postback": return onPostback(cmd.data, ctx);
-    case "notes": return notesReply(ctx);
+    case "notes": return notesReply(ctx, null, [], cmd.category ?? null);
     case "noteAdd": return noteAdd(cmd, ctx);
     case "noteDone": return noteDone(cmd, ctx);
     case "noteClear": return noteClear(cmd, ctx);
@@ -541,19 +541,26 @@ async function menuCard(ctx) {
 const MAX_NOTES_PER_CHAT = 100;
 const catOf = (key) => NOTE_CATEGORIES.find((c) => c.key === key) ?? NOTE_CATEGORIES.at(-1);
 
-async function notesReply(ctx, header = null, extraQuick = []) {
-  const { results } = await ctx.env.DB.prepare("SELECT * FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all();
+async function notesReply(ctx, header = null, extraQuick = [], category = null) {
+  const { results: all } = await ctx.env.DB.prepare("SELECT * FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all();
+  const only = category ? catOf(category) : null;
+  const results = only ? all.filter((n) => n.category === only.key) : all;
   if (!results.length) {
-    return [header, "📝 記事本是空的。", "新增：記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費"].filter(Boolean).join("\n");
+    const empty = only ? `${only.icon} ${only.name}：目前沒有記事。` : "📝 記事本是空的。";
+    const tip = only ? `新增：記 ${only.name} …` : "新增：記 買 尿布、牛奶　/　記 帶 健保卡　/　記 做 繳費";
+    const others = only && all.length ? `（其他分類還有 ${all.length} 筆，輸入「記事」看全部）` : "";
+    return [header, empty, others, tip].filter(Boolean).join("\n");
   }
   const lines = header ? [header, ""] : [];
-  lines.push(`📝 記事（${results.length}）`);
+  lines.push(only ? `${only.icon} ${only.name}（${results.length}）` : `📝 記事（${results.length}）`);
   for (const c of NOTE_CATEGORIES) {
     const items = results.filter((n) => n.category === c.key);
     if (!items.length) continue;
-    lines.push("", `${c.icon} ${c.name}`, ...items.map((n) => `  #${n.id} ${n.text}${n.image_key ? " 📷" : ""}`));
+    if (!only) lines.push("", `${c.icon} ${c.name}`);
+    lines.push(...items.map((n) => `${only ? "" : "  "}#${n.id} ${n.text}${n.image_key ? " 📷" : ""}`));
   }
   lines.push("", "完成：完成 編號（可多筆）");
+  if (only && all.length > results.length) lines.push(`其他分類還有 ${all.length - results.length} 筆，輸入「記事」看全部`);
   const quick = [
     ...extraQuick,
     ...results.filter((n) => n.image_key).map((n) => quickText(`🖼 看圖 #${n.id} ${n.text}`, `看圖 ${n.id}`)),
@@ -782,3 +789,4 @@ async function checkOne(row, cfg, ctx) {
 
 // 測試用
 export const __menuCardForTest = (ctx) => menuCard(ctx);
+export const __notesReplyForTest = (ctx, ...a) => notesReply(ctx, ...a);

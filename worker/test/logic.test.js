@@ -226,6 +226,19 @@ test("notes: 口語說法", () => {
   assert.deepEqual(n("記得繳停車費喔"), ["todo:繳停車費"]);
   assert.equal(parseCommand("帶水壺").natural, true);
 });
+test("notes: 分類查詢", () => {
+  const q = (t) => parseCommand(t);
+  assert.deepEqual(q("記事"), { cmd: "notes" });
+  for (const [t, c] of [["記事 買", "buy"], ["記事買", "buy"], ["記事 買什麼", "buy"], ["記事 買東西", "buy"], ["記事 要買的東西", "buy"],
+    ["記事 帶", "bring"], ["記事 帶什麼", "bring"], ["記事 做", "todo"], ["記事 待辦", "todo"], ["記事 出國", "trip"],
+    ["記事 出國帶什麼", "trip"], ["記事 其他", "other"],
+    ["買什麼", "buy"], ["要買什麼？", "buy"], ["買東西", "buy"], ["要帶什麼", "bring"], ["帶啥", "bring"],
+    ["出國帶什麼", "trip"], ["出國要帶什麼?", "trip"], ["出國要買什麼", "trip"]]) {
+    assert.deepEqual(q(t), { cmd: "notes", category: c }, t);
+  }
+  assert.equal(q("記事本好用"), null);
+  assert.equal(q("今天要買什麼"), null);
+});
 test("notes: 出國分類", () => {
   const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
   assert.deepEqual(parseCommand("記 出國 護照、轉接頭"), { cmd: "noteAdd", category: "trip", items: ["護照", "轉接頭"] });

@@ -82,15 +82,23 @@ export function parseCommand(raw) {
     if (!items.length) return { cmd: "usage", reason: "格式：記 買 尿布、牛奶（分類：買 / 帶 / 做，可省略）" };
     return { cmd: "noteAdd", category, items };
   }
-  if (["記事", "筆記", "notes"].includes(key)) {
-    if (!tokens.length) return { cmd: "notes" };
-    if (["清空", "清除"].includes(tokens[0])) {
-      const cat = tokens[1] ? NOTE_ALIASES[tokens[1]] : null;
-      if (tokens[1] && !cat) return { cmd: "usage", reason: "格式：記事 清空 [買 / 帶 / 做 / 其他]" };
+  // 「記事」「記事 買」「記事買什麼」「記事 出國」
+  const nq = text.match(/^(?:記事|筆記|notes)\s*(.*)$/i);
+  if (nq) {
+    const rest = nq[1].trim();
+    if (!rest) return { cmd: "notes" };
+    const [first, second] = rest.split(/\s+/);
+    if (["清空", "清除"].includes(first)) {
+      const cat = second ? NOTE_ALIASES[second] : null;
+      if (second && !cat) return { cmd: "usage", reason: "格式：記事 清空 [買 / 帶 / 做 / 出國 / 其他]" };
       return { cmd: "noteClear", category: cat };
     }
-    return null;
+    const cat = noteCategoryOf(rest);
+    return cat ? { cmd: "notes", category: cat } : null;
   }
+  // 單獨問「買什麼」「要帶什麼」「出國要帶什麼」→ 列出該分類
+  const ask = text.match(/^(?:要)?(出國\s*(?:要)?\s*帶|出國\s*(?:要)?\s*買|買|帶)\s*(?:什麼|甚麼|啥|東西|哪些)\s*[?？]?$/);
+  if (ask) return { cmd: "notes", category: /出國/.test(ask[1]) ? "trip" : ask[1] === "買" ? "buy" : "bring" };
   if (["完成", "勾", "done"].includes(key)) {
     const ids = tokens.join(" ").match(/\d+/g)?.map(Number) ?? [];
     if (!ids.length) return { cmd: "usage", reason: "格式：完成 3（可一次多筆：完成 3 5 7）" };
@@ -227,6 +235,13 @@ export function parseNaturalNote(raw) {
   return { cmd: "noteAdd", entries, natural: true };
 }
 
+/** 「買」「買什麼」「要買的東西」「出國帶什麼」「待辦」→ 分類 key */
+function noteCategoryOf(raw) {
+  let t = raw.replace(/[?？\s]/g, "").replace(/^要/, "").replace(/(?:什麼|甚麼|啥|東西|哪些|清單|列表|的)+$/, "").replace(/^要/, "");
+  if (/^出國/.test(t)) return "trip";
+  return NOTE_ALIASES[t] ?? null;
+}
+
 export const NOTE_CATEGORIES = [
   { key: "buy", name: "買", icon: "🛒" },
   { key: "bring", name: "帶", icon: "🎒" },
@@ -239,6 +254,7 @@ const NOTE_ALIASES = {
   帶: "bring", 攜帶: "bring", 要帶: "bring",
   做: "todo", 要做: "todo", 待辦: "todo", 辦: "todo", 要幹麻: "todo", 要幹嘛: "todo",
   出國: "trip", 出國帶: "trip", 出國要帶: "trip",
+  出國買: "trip", 出國要買: "trip", 旅行: "trip",
   其他: "other",
 };
 
@@ -263,6 +279,8 @@ export const HELP = [
   "  口語也行：帶保鮮盒、買麵、買晚餐／學校要帶濕紙巾",
   "▶ 出國帶 護照、轉接頭　（✈️ 出國分類）",
   "▶ 記事　（列出全部）",
+  "▶ 記事 買　/　買什麼　/　要帶什麼　/　出國帶什麼",
+  "  只看某一類",
   "▶ 完成 3　/　記事 清空 買",
   "▶ 附圖 3（再傳照片）／看圖 3",
   "",
