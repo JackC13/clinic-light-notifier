@@ -86,6 +86,40 @@
 - 記事列表中有提醒的項目會標 ⏰ 時間
 - 提醒是推播，會用到 LINE 每月免費額度（群組按人數計），同一分鐘的提醒會合併成一則
 
+### 🤖 AI 小幫手（Claude 或 Gemini）
+
+| 怎麼叫 | 例子 |
+|---|---|
+| 開頭打 `AI`（或 `小幫手`、`問AI`） | `AI 明天要帶什麼？` |
+| 在群組 @機器人 | `@看診小幫手 幫我記週五要買牛奶和吐司` |
+| 一對一聊天 | 不是指令的訊息都會交給 AI |
+
+- AI 會參考群組的記事、提醒、看診追蹤來回答（「還要買什麼？」「明天要帶什麼？」）
+- 說「幫我記…」「…提醒我」時，AI 會新增記事 / 提醒，並附「撤銷」「取消提醒」按鈕；AI 不能刪除或修改資料
+- 會記得最近 3 小時內的幾輪對話，可以接著追問
+- 回覆用 reply，不佔 LINE 推播額度；API 費用另計（見下方）
+
+**設定**（在 `worker/` 資料夾）：
+
+```bash
+npx wrangler secret put ANTHROPIC_API_KEY   # Claude：console.anthropic.com → API Keys
+# 或
+npx wrangler secret put GEMINI_API_KEY      # Gemini：aistudio.google.com → Get API key
+npm run db:migrate
+npm run deploy
+```
+
+注意：claude.ai 的 Pro / Max 訂閱、Gemini App 的 Google AI Pro 訂閱**不包含 API**，要另外在上面的網站建立 API 金鑰（API 按用量計費，要先儲值或綁卡）。
+
+可選設定（`wrangler.toml` 的 `[vars]`）：
+
+| 名稱 | 預設 | 說明 |
+|---|---|---|
+| `AI_PROVIDER` | 兩個金鑰都有時用 Claude | `claude` 或 `gemini` |
+| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | 便宜快速；想要更聰明可改 `claude-sonnet-5-5` |
+| `GEMINI_MODEL` | `gemini-flash-latest` | |
+| `AI_DAILY_LIMIT` | `200` | 每個聊天室每天最多問幾次，避免誤觸燒錢 |
+
 ## 運作方式
 
 臺大的查詢頁 `ClinicCurrentLightNo` 內含驗證 token，`POST /WebReg/WebReg/DeptLightTable`

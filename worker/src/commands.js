@@ -35,6 +35,11 @@ export function parseCommand(raw, now = Date.now()) {
   const [head = "", ...tokens] = text.split(/\s+/);
   const key = head.toLowerCase();
 
+  // AI 小幫手：「AI 明天要帶什麼」「問AI …」「小幫手 …」
+  const ai = text.match(/^(?:問\s*)?(?:ai|AI|Ai|小幫手)(?:[\s:：,，、]+|(?=[^\x00-\x7F]))([\s\S]+)$/);
+  if (ai) return { cmd: "ai", text: ai[1].trim() };
+  if (/^(?:問\s*)?(?:ai|小幫手)$/i.test(text)) return { cmd: "ai", text: "" };
+
   const num = text.match(NUM_RE);
   if (num) return { cmd: "number", number: parseInt(num[1], 10) };
 
@@ -362,6 +367,8 @@ export const NOTE_HELP = [
   "問句和聊天（帶小孩去公園、買了晚餐）不會被記下來。",
 ].join("\n");
 
+export const AI_HELP = "🤖 AI 小幫手：開頭打「AI」或 @機器人 就能問（例：AI 明天要帶什麼？）";
+
 export const HELP = [
   "📋 看診燈號提醒（臺大醫院）",
   "輸入「選單」可以用按鈕操作",
@@ -395,6 +402,9 @@ export const HELP = [
   "▶ 30分鐘後提醒 關火　/　週五晚上提醒我倒垃圾",
   "▶ 明天帶月餅　（記事＋當天早上 8 點提醒）",
   "▶ 提醒列表　/　取消提醒 3",
+  "",
+  "🤖 AI 小幫手",
+  "▶ AI 明天要帶什麼？　/　@機器人 幫我記週五買牛奶",
   "",
   "剩 10、5、2 號與到號時通知，到號後自動移除。",
 ].join("\n");

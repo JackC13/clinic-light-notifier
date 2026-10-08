@@ -356,3 +356,28 @@ test("delete: 刪除指令", () => {
   assert.deepEqual(parseCommand("取消 3"), { cmd: "cancel", id: 3 });
   assert.deepEqual(parseCommand("取消提醒 3"), { cmd: "remindCancel", id: 3 });
 });
+
+// ── AI 小幫手 ──
+import { parseAiOutput, parseTaipeiTime, aiProvider } from "../src/ai.js";
+test("ai: 觸發指令", () => {
+  assert.deepEqual(parseCommand("AI 明天要帶什麼？"), { cmd: "ai", text: "明天要帶什麼？" });
+  assert.deepEqual(parseCommand("ai:你好"), { cmd: "ai", text: "你好" });
+  assert.deepEqual(parseCommand("AI明天要帶什麼"), { cmd: "ai", text: "明天要帶什麼" });
+  assert.deepEqual(parseCommand("小幫手 幫我記買牛奶"), { cmd: "ai", text: "幫我記買牛奶" });
+  assert.deepEqual(parseCommand("AI"), { cmd: "ai", text: "" });
+  assert.equal(parseCommand("air fryer"), null);
+  assert.equal(parseCommand("AIR"), null);
+});
+test("ai: 輸出解析", () => {
+  assert.deepEqual(parseAiOutput('{"reply":"好","actions":[{"type":"note","category":"buy","text":"牛奶"}]}'),
+    { reply: "好", actions: [{ type: "note", category: "buy", text: "牛奶" }] });
+  assert.deepEqual(parseAiOutput('```json\n{"reply":"嗨","actions":[]}\n```'), { reply: "嗨", actions: [] });
+  assert.deepEqual(parseAiOutput("純文字回覆"), { reply: "純文字回覆", actions: [] });
+  assert.equal(parseTaipeiTime("2026-10-09 18:30"), Date.UTC(2026, 9, 9, 10, 30));
+  assert.equal(parseTaipeiTime("2026-10-09"), Date.UTC(2026, 9, 9, 0, 0));
+  assert.equal(parseTaipeiTime("明天"), null);
+  assert.equal(aiProvider({}), null);
+  assert.equal(aiProvider({ GEMINI_API_KEY: "g" }), "gemini");
+  assert.equal(aiProvider({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" }), "claude");
+  assert.equal(aiProvider({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a", AI_PROVIDER: "gemini" }), "gemini");
+});

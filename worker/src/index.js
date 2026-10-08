@@ -2,8 +2,9 @@
 //   fetch     : 接收 LINE webhook，處理群組指令與按鈕
 //   scheduled : 每分鐘檢查到期的追蹤，抓燈號、推播
 
-import { parseCommand, HELP, NOTE_HELP, NOTE_CATEGORIES } from "./commands.js";
-import { verifySignature, reply, push, textMsg, quickPostback, quickText, getContent, imageMsg, quickCamera, quickCameraRoll } from "./line.js";
+import { parseCommand, HELP, NOTE_HELP, NOTE_CATEGORIES, AI_HELP } from "./commands.js";
+import { verifySignature, reply, push, textMsg, quickPostback, quickText, getContent, imageMsg, quickCamera, quickCameraRoll, showLoading } from "./line.js";
+import { aiProvider, chat, parseAiOutput, parseTaipeiTime, buildSystemPrompt } from "./ai.js";
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
@@ -54,7 +55,22 @@ async function handleEvent(event, env, origin) {
   if (!chatId || !event.replyToken) return;
 
   let cmd = null;
-  if (event.type === "message" && event.message?.type === "text") cmd = parseCommand(event.message.text);
+  if (event.type === "message" && event.message?.type === "text") {
+    const m = event.message;
+    // @機器人：把提及的文字拿掉，整句交給 AI
+    const selfMention = m.mention?.mentionees?.find((x) => x.isSelf);
+    if (selfMention) {
+      const stripped = m.mention.mentionees
+        .filter((x) => x.isSelf)
+        .sort((a, b) => b.index - a.index)
+        .reduce((t, x) => t.slice(0, x.index) + t.slice(x.index + x.length), m.text);
+      cmd = { cmd: "ai", text: stripped.trim() };
+    } else {
+      cmd = parseCommand(m.text);
+      // 一對一聊天：不是指令的話都交給 AI
+      if (!cmd && src.type === "user" && aiProvider(env)) cmd = { cmd: "ai", text: m.text.trim() };
+    }
+  }
   else if (event.type === "message" && event.message?.type === "image") cmd = { cmd: "image", messageId: event.message.id };
   else if (event.type === "postback") {
     try {
@@ -108,6 +124,7 @@ async function runCommand(cmd, ctx) {
     case "noteEdit": return noteEdit(cmd, ctx);
     case "delete": return deleteByIds(cmd.ids, ctx);
     case "label": return setLabel(cmd, ctx);
+    case "ai": return aiChat(cmd, ctx);
     case "remind": return remind(cmd, ctx);
     case "remindList": return remindList(ctx);
     case "remindCancel": return remindCancel(cmd.id, ctx);
@@ -456,6 +473,7 @@ async function cancel(cmd, ctx) {
 // ───────────────────────── 選單卡片 ─────────────────────────
 
 const HINTS = {
+  ai: textMsg("🤖 開頭打「AI」再接問題，或在群組 @機器人：\n　AI 明天要帶什麼？\n　AI 幫我記週五要買牛奶和吐司\n　AI 小孩發燒 38 度要注意什麼？"),
   lookup: textMsg("🔎 直接輸入「燈號 醫師名」\n例：燈號 戴季珊"),
   track: textMsg("🩺 直接輸入「追蹤 號碼 醫師名」最快\n例：追蹤 25 戴季珊\n\n或用按鈕一步一步選：", [quickText("用按鈕選", "追蹤")]),
   note: textMsg([
@@ -546,6 +564,7 @@ async function menuCard(ctx) {
         section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
         row(msg("看記事", "記事", true), hint("記一筆", "note")),
         row(msg("⏰ 提醒列表", "提醒列表"), msg("記事說明", "記事 說明")),
+        ...(aiProvider(ctx.env) ? [row(hint("🤖 問 AI 小幫手", "ai"))] : []),
       ],
     },
     styles: { header: { separator: false } },
@@ -704,6 +723,99 @@ async function noteClear(cmd, ctx) {
     : await db.prepare("DELETE FROM notes WHERE chat_id = ?").bind(ctx.chatId).run();
   const what = cmd.category ? `「${catOf(cmd.category).name}」` : "全部記事";
   return r.meta.changes ? `🗑 已清空${what}（${r.meta.changes} 筆）` : `${what}本來就是空的`;
+}
+
+// ── AI 小幫手 ──
+
+const AI_HISTORY_TURNS = 8;              // 保留最近幾則（問＋答）
+const AI_HISTORY_TTL = 3 * 3600_000;     // 超過 3 小時的對話不帶入
+
+async function aiChat(cmd, ctx) {
+  const env = ctx.env, db = env.DB;
+  if (!aiProvider(env)) {
+    return "🤖 AI 小幫手還沒設定金鑰。\n請在 worker 資料夾執行：\nnpx wrangler secret put ANTHROPIC_API_KEY\n（或 GEMINI_API_KEY）";
+  }
+  if (!cmd.text) return textMsg(`${AI_HELP}\n\n可以問：\n・明天要帶什麼？\n・幫我記週五要買牛奶和吐司\n・小孩發燒 38 度要注意什麼？`);
+
+  // 每日上限，避免誤觸燒錢
+  const limit = parseInt(env.AI_DAILY_LIMIT ?? "200", 10);
+  const day = new Date(ctx.now + 8 * 3600_000).toISOString().slice(0, 10);
+  const key = `ai_count:${ctx.chatId}:${day}`;
+  const used = parseInt((await db.prepare("SELECT value FROM kv WHERE key = ?").bind(key).first())?.value ?? "0", 10);
+  if (used >= limit) return `🤖 今天已經問了 ${used} 次，達到上限（AI_DAILY_LIMIT=${limit}），明天再來吧`;
+  await db.prepare("INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)").bind(key, String(used + 1), ctx.now).run();
+
+  if (ctx.chatId.startsWith("U")) await showLoading(env, ctx.chatId);
+
+  // 給 AI 的背景資料
+  const [{ results: notes }, { results: rems }, { results: tracks }, { results: hist }] = await Promise.all([
+    db.prepare("SELECT id, category, text FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all(),
+    db.prepare("SELECT id, text, due_at, note_ids FROM reminders WHERE chat_id = ? ORDER BY due_at LIMIT 20").bind(ctx.chatId).all(),
+    db.prepare("SELECT * FROM trackings WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all(),
+    db.prepare("SELECT role, content FROM ai_history WHERE chat_id = ? AND created_at > ? ORDER BY id DESC LIMIT ?")
+      .bind(ctx.chatId, ctx.now - AI_HISTORY_TTL, AI_HISTORY_TURNS).all(),
+  ]);
+  const system = buildSystemPrompt({
+    nowText: formatWhen(ctx.now, ctx.now).replace(/^今天 /, "") + `（${new Date(ctx.now + 8 * 3600_000).getUTCFullYear()} 年）`,
+    notes: notes.map((n) => `#${n.id} ${catOf(n.category).name}：${n.text}`).join("；"),
+    reminders: rems.map((r) => `#${r.id} ${formatWhen(r.due_at, ctx.now)} ${r.text}`).join("；"),
+    trackings: tracks.map((t) => `${title(t)} ${t.my_number} 號，目前 ${t.last_number ?? "未開始"}`).join("；"),
+  });
+  const messages = [...hist.reverse(), { role: "user", content: cmd.text.slice(0, 2000) }];
+  // Claude 要求第一則是 user
+  while (messages.length && messages[0].role !== "user") messages.shift();
+
+  let out;
+  try {
+    out = parseAiOutput(await chat(env, system, messages));
+  } catch (e) {
+    console.error("AI:", e);
+    return `🤖 AI 暫時無法回應：${e.name === "TimeoutError" ? "等太久了，請再試一次" : e.message}`;
+  }
+
+  // 執行 AI 要求的動作（只有新增記事 / 提醒）
+  const done = [], noteIds = [], quick = [];
+  for (const a of out.actions) {
+    try {
+      if (a?.type === "note" && a.text) {
+        const category = NOTE_CATEGORIES.some((c) => c.key === a.category) ? a.category : "other";
+        const text = String(a.text).slice(0, 30);
+        const r = await db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)")
+          .bind(ctx.chatId, category, text, ctx.now).run();
+        const id = r.meta.last_row_id;
+        noteIds.push(id);
+        let line = `📝 ${catOf(category).icon} ${catOf(category).name}：${text}（#${id}）`;
+        const at = parseTaipeiTime(a.at);
+        if (at && at > ctx.now + 30_000) {
+          await db.prepare("INSERT INTO reminders (chat_id, text, due_at, note_ids, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(ctx.chatId, `${catOf(category).icon} ${catOf(category).name}：${text}`, at, String(id), ctx.userId, ctx.now).run();
+          line += ` ⏰ ${formatWhen(at, ctx.now)}`;
+        }
+        done.push(line);
+      } else if (a?.type === "remind" && a.text) {
+        const at = parseTaipeiTime(a.at);
+        if (!at || at <= ctx.now + 30_000) continue;
+        const text = String(a.text).slice(0, 60);
+        const r = await db.prepare("INSERT INTO reminders (chat_id, text, due_at, note_ids, created_by, created_at) VALUES (?, ?, ?, NULL, ?, ?)")
+          .bind(ctx.chatId, text, at, ctx.userId, ctx.now).run();
+        done.push(`⏰ ${formatWhen(at, ctx.now)}：${text}（提醒 #${r.meta.last_row_id}）`);
+        quick.push(quickText(`取消提醒 #${r.meta.last_row_id}`, `取消提醒 ${r.meta.last_row_id}`));
+      }
+    } catch (e) {
+      console.error("AI action:", e);
+    }
+  }
+  if (noteIds.length) quick.unshift(quickPostback("↩️ 撤銷記事", { a: "undo", ids: noteIds }, "撤銷"));
+
+  const replyText = out.reply || (done.length ? "好的！" : "🤖 （沒有回應）");
+  await db.batch([
+    db.prepare("INSERT INTO ai_history (chat_id, role, content, created_at) VALUES (?, 'user', ?, ?)").bind(ctx.chatId, cmd.text.slice(0, 2000), ctx.now),
+    db.prepare("INSERT INTO ai_history (chat_id, role, content, created_at) VALUES (?, 'assistant', ?, ?)").bind(ctx.chatId, replyText.slice(0, 2000), ctx.now + 1),
+    db.prepare("DELETE FROM ai_history WHERE created_at < ?").bind(ctx.now - AI_HISTORY_TTL),
+  ]);
+
+  const text = done.length ? `${replyText}\n\n${done.join("\n")}` : replyText;
+  return textMsg(`🤖 ${text}`, quick);
 }
 
 // ── 提醒 ──

@@ -87,6 +87,11 @@ export async function getContent(env, messageId, preview = false) {
   return { body: await res.arrayBuffer(), type: res.headers.get("Content-Type") || "image/jpeg" };
 }
 
+/** 「輸入中…」動畫（只有一對一聊天有效） */
+export function showLoading(env, chatId, seconds = 20) {
+  return call(env, "/v2/bot/chat/loading/start", { chatId, loadingSeconds: seconds }).catch(() => false);
+}
+
 export function imageMsg(url, previewUrl = url) {
   return { type: "image", originalContentUrl: url, previewImageUrl: previewUrl };
 }
