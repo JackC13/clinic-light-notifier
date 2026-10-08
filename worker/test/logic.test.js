@@ -346,3 +346,13 @@ test("notes: 修改", () => {
   assert.equal(parseCommand("改").cmd, "usage");
   assert.equal(parseCommand("改天再說"), null);
 });
+
+test("delete: 刪除指令", () => {
+  assert.deepEqual(parseCommand("刪除 30"), { cmd: "delete", ids: [30] });
+  assert.deepEqual(parseCommand("刪除30"), { cmd: "delete", ids: [30] });
+  assert.deepEqual(parseCommand("刪除 #3 5、7"), { cmd: "delete", ids: [3, 5, 7] });
+  assert.deepEqual(parseCommand("刪掉 3"), { cmd: "delete", ids: [3] });
+  assert.equal(parseCommand("刪除 全部").cmd, "usage");
+  assert.deepEqual(parseCommand("取消 3"), { cmd: "cancel", id: 3 });
+  assert.deepEqual(parseCommand("取消提醒 3"), { cmd: "remindCancel", id: 3 });
+});

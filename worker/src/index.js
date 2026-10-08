@@ -106,6 +106,7 @@ async function runCommand(cmd, ctx) {
     case "noteDone": return noteDone(cmd, ctx);
     case "noteClear": return noteClear(cmd, ctx);
     case "noteEdit": return noteEdit(cmd, ctx);
+    case "delete": return deleteByIds(cmd.ids, ctx);
     case "label": return setLabel(cmd, ctx);
     case "remind": return remind(cmd, ctx);
     case "remindList": return remindList(ctx);
@@ -443,7 +444,11 @@ async function cancel(cmd, ctx) {
     return r.meta.changes ? `🗑 已取消全部 ${r.meta.changes} 筆追蹤` : "目前沒有追蹤中的看診";
   }
   const row = await db.prepare("SELECT * FROM trackings WHERE id = ? AND chat_id = ?").bind(cmd.id, ctx.chatId).first();
-  if (!row) return `找不到 #${cmd.id}，輸入「列表」查看編號`;
+  if (!row) {
+    const note = await db.prepare("SELECT text FROM notes WHERE id = ? AND chat_id = ?").bind(cmd.id, ctx.chatId).first();
+    if (note) return textMsg(`追蹤裡沒有 #${cmd.id}。記事 #${cmd.id} 是「${note.text}」，要刪記事請用：刪除 ${cmd.id}`, [quickText(`🗑 刪除記事 #${cmd.id}`, `刪除 ${cmd.id}`)]);
+    return `找不到 #${cmd.id}，輸入「列表」查看編號`;
+  }
   await db.prepare("DELETE FROM trackings WHERE id = ?").bind(cmd.id).run();
   return `🗑 已取消 ${title(row)}，${row.my_number} 號`;
 }
@@ -631,6 +636,46 @@ async function noteDone(cmd, ctx) {
   await deleteImages(ctx.env, results);
   await db.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...cmd.ids).run();
   return notesReply(ctx, `✔️ 完成：${results.map((n) => n.text).join("、")}`);
+}
+
+/** 「刪除 30」：刪記事；編號只在追蹤裡才取消追蹤；兩邊都有就問 */
+async function deleteByIds(ids, ctx) {
+  const db = ctx.env.DB;
+  const marks = ids.map(() => "?").join(",");
+  const { results: notes } = await db.prepare(`SELECT * FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...ids).all();
+  const { results: tracks } = await db.prepare(`SELECT * FROM trackings WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...ids).all();
+  const noteIds = new Set(notes.map((n) => n.id));
+  const trackIds = new Set(tracks.map((t) => t.id));
+
+  if (!notes.length && !tracks.length) return `找不到 ${ids.map((i) => `#${i}`).join("、")}，輸入「記事」或「列表」查看編號`;
+
+  // 同一個編號同時是記事和追蹤：問清楚
+  const both = ids.filter((i) => noteIds.has(i) && trackIds.has(i));
+  if (both.length) {
+    const i = both[0];
+    const n = notes.find((x) => x.id === i), t = tracks.find((x) => x.id === i);
+    return textMsg(`#${i} 同時有記事和追蹤，要刪哪一個？\n📝 記事：${n.text}\n🩺 追蹤：${title(t)} ${t.my_number} 號`, [
+      quickText(`📝 刪記事 ${n.text}`, `完成 ${i}`),
+      quickText(`🩺 取消追蹤 #${i}`, `取消 ${i}`),
+    ]);
+  }
+
+  const lines = [];
+  if (notes.length) {
+    await deleteImages(ctx.env, notes);
+    const nm = notes.map(() => "?").join(",");
+    await db.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${nm})`).bind(ctx.chatId, ...noteIds).run();
+    lines.push(`🗑 已刪除記事：${notes.map((n) => `#${n.id} ${n.text}`).join("、")}`);
+  }
+  if (tracks.length) {
+    const tm = tracks.map(() => "?").join(",");
+    await db.prepare(`DELETE FROM trackings WHERE chat_id = ? AND id IN (${tm})`).bind(ctx.chatId, ...trackIds).run();
+    lines.push(...tracks.map((t) => `🗑 已取消追蹤：${title(t)}，${t.my_number} 號`));
+  }
+  const missing = ids.filter((i) => !noteIds.has(i) && !trackIds.has(i));
+  if (missing.length) lines.push(`（找不到 ${missing.map((i) => `#${i}`).join("、")}）`);
+  if (!notes.length) return lines.join("\n");
+  return notesReply(ctx, lines.join("\n"));
 }
 
 async function noteEdit(cmd, ctx) {

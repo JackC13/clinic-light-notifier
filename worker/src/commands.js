@@ -65,7 +65,14 @@ export function parseCommand(raw, now = Date.now()) {
   const rc = text.match(/^(?:取消|刪除)\s*提醒\s*#?(\d+)$/);
   if (rc) return { cmd: "remindCancel", id: parseInt(rc[1], 10) };
 
-  if (["取消", "刪除", "cancel", "停止"].includes(key)) {
+  // 刪除 30 / 刪除 3 5 7（記事；編號不是記事時改取消追蹤）
+  const del = text.match(/^(?:刪除|刪掉|刪|移除|delete|del)\s*((?:#?\d+[\s,、，]*)+)$/i);
+  if (del) return { cmd: "delete", ids: [...new Set(del[1].match(/\d+/g).map(Number))].slice(0, 20) };
+  if (/^(?:刪除|刪掉|刪|移除|delete|del)(?:\s|$)/i.test(text)) {
+    return { cmd: "usage", reason: "格式：刪除 30（可一次多筆：刪除 3 5 7）\n清空記事：記事 清空　/　取消全部追蹤：取消 全部" };
+  }
+
+  if (["取消", "cancel", "停止"].includes(key)) {
     const arg = tokens.join("").replace(/^#/, "");
     if (["全部", "all"].includes(arg.toLowerCase())) return { cmd: "cancel", all: true };
     if (/^\d+$/.test(arg)) return { cmd: "cancel", id: parseInt(arg, 10) };
@@ -344,7 +351,7 @@ export const NOTE_HELP = [
   "▶ 改 3 買 牛奶　（換分類＋內容）　/　改 3 出國（只換分類）",
   "",
   "【完成、清空】",
-  "▶ 完成 3　/　完成 3 5 7",
+  "▶ 完成 3　/　完成 3 5 7　/　刪除 3（一樣會刪掉）",
   "▶ 記事 清空 買　/　記事 清空（全部）",
   "",
   "【照片】",
@@ -378,7 +385,7 @@ export const HELP = [
   "▶ 記事　（列出全部）",
   "▶ 記事 買　/　買什麼　/　要帶什麼　/　出國帶什麼",
   "  只看某一類",
-  "▶ 完成 3　/　記事 清空 買",
+  "▶ 完成 3　/　刪除 3　/　記事 清空 買",
   "▶ 改 3 大保鮮盒　（修改記事）",
   "▶ 附圖 3（再傳照片）／看圖 3",
   "▶ 記事 說明　（記事本完整用法）",
