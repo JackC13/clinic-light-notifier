@@ -381,3 +381,18 @@ test("ai: 輸出解析", () => {
   assert.equal(aiProvider({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" }), "claude");
   assert.equal(aiProvider({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a", AI_PROVIDER: "gemini" }), "gemini");
 });
+
+test("notes: 「東西要做什麼」→ 做", () => {
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(n("lego要比價"), ["todo:lego要比價"]);
+  assert.deepEqual(n("LEGO 要比價"), ["todo:LEGO要比價"]);
+  assert.deepEqual(n("冷氣要送修"), ["todo:冷氣要送修"]);
+  assert.deepEqual(n("包裹要去7-11取貨"), undefined);
+  assert.deepEqual(n("網卡要退貨"), ["todo:網卡要退貨"]);
+  assert.deepEqual(n("記得lego要比價"), ["todo:lego要比價"]);
+  const d = parseCommand("明天要繳費");
+  assert.equal(d.entries[0].text, "繳費");
+  assert.ok(d.remindAt);
+  for (const t of ["我要比價", "要洗澡了", "車子要保養了嗎", "你要問誰", "lego要不要比價"]) assert.equal(parseCommand(t), null, t);
+  assert.deepEqual(n("學校要帶濕紙巾"), ["bring:濕紙巾（學校）"]);
+});

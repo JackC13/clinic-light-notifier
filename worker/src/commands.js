@@ -203,6 +203,9 @@ const MEASURE = /^(?:一(?:個|些|點|下|包|盒|瓶|袋|條|罐|份|顆|張|�
 const CHATTY = /去|來|回|到|給|跟|一起|了|過|很|太|在|吧|貴|便宜|好吃|可以|不|沒|想|會|他|她|你|我/;
 // 數量說法，判斷是不是閒聊時先拿掉（「很多愛」的「很」不算閒聊）
 const QTY = /^(?:很多|好多|超多|一堆|多一點|多點|一點點?|一些|幾(?:個|包|盒|瓶|條|罐|份|顆|張|件|雙|支|本|片))/;
+// 「lego要比價」：某樣東西 + 要 + 待辦動詞
+const TODO_VERBS = "比價|比較|退貨|退款|退|換貨|換|送修|修理|修|保養|驗車|洗|繳費|繳|付款|轉帳|寄|收|還|歸還|預約|掛號|訂位|訂|報名|領|取貨|拿|查|問|整理|清|丟|回覆|回電|聯絡|簽名|簽|填|印|列印|充電|加油|續約|取消|退訂|備份|更新|充值|儲值|加值";
+const TODO_RE = new RegExp(`^(?:([^\\s，,、]{1,12}?)\\s*)?(?:要|得|需要|該)\\s*((?:${TODO_VERBS}).{0,20})$`);
 // 「學校要帶…」「明天得買…」：句首的場合
 const CONTEXT = /^([^\s]{1,6}?)\s*(?:要|需要|(?<![記曉懂覺])得)\s*(?=帶|買)/;
 const PRONOUN = /我|你|他|她|大家/;
@@ -230,6 +233,14 @@ export function parseNaturalNote(raw) {
   if (r) {
     reminded = true;
     body = body.slice(r[0].length).replace(/^要\s*/, "");
+  }
+
+  // 「lego要比價」「冷氣要送修」「(明天)要繳費」→ ✅ 做
+  const todo = body.replace(TRAILING, "").match(TODO_RE);
+  if (todo && !/[、，,；;\n]/.test(body)) {
+    const [, subject = "", rest] = todo;
+    if (PRONOUN.test(subject) || CHATTY.test(rest.slice(1))) return null;
+    return { cmd: "noteAdd", entries: [{ category: "todo", text: (subject ? `${subject}要${rest}` : rest).slice(0, 30) }], natural: true };
   }
 
   const segs = body.split(/[、，,；;\n]+/).map((x) => x.replace(TRAILING, "").trim()).filter(Boolean);
