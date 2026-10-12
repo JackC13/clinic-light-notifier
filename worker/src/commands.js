@@ -203,6 +203,10 @@ const MEASURE = /^(?:一(?:個|些|點|下|包|盒|瓶|袋|條|罐|份|顆|張|�
 const CHATTY = /去|來|回|到|給|跟|一起|了|過|很|太|在|吧|貴|便宜|好吃|可以|不|沒|想|會|他|她|你|我/;
 // 數量說法，判斷是不是閒聊時先拿掉（「很多愛」的「很」不算閒聊）
 const QTY = /^(?:很多|好多|超多|一堆|多一點|多點|一點點?|一些|幾(?:個|包|盒|瓶|條|罐|份|顆|張|件|雙|支|本|片))/;
+// 「淘寶買木耳粉撲」「去全聯買牛奶」：店家 / 地方 + 買
+const STORE = /^(?:去|到|在|上)?\s*([^\s，,、]{1,6}?)\s*(?:上|去)?\s*(?=買\s*\S)/;
+const NOT_STORE = /剛|已|昨|有|沒|也|都|還|再|又|才|就|先|會|想|不|了|我|你|他|她|大家|要|得|記/;
+
 // 「lego要比價」：某樣東西 + 要 + 待辦動詞
 const TODO_VERBS = "比價|比較|退貨|退款|退|換貨|換|送修|修理|修|保養|驗車|洗|繳費|繳|付款|轉帳|寄|收|還|歸還|預約|掛號|訂位|訂|報名|領|取貨|拿|查|問|整理|清|丟|回覆|回電|聯絡|簽名|簽|填|印|列印|充電|加油|續約|取消|退訂|備份|更新|充值|儲值|加值";
 const TODO_RE = new RegExp(`^(?:([^\\s，,、]{1,12}?)\\s*)?(?:要|得|需要|該)\\s*((?:${TODO_VERBS}).{0,20})$`);
@@ -249,6 +253,7 @@ export function parseNaturalNote(raw) {
   const entries = [];
   let category = null;
   let prefix = "";                  // 「出國買…」記成出國分類的「買…」
+  let lastTags = [];                // 沒寫動詞的段落沿用前一段的場合：「去全聯買牛奶、衛生紙」
   for (let seg of segs) {
     let sure = reminded;            // 這一段有明確的記事語氣
     const tags = [];
@@ -265,11 +270,15 @@ export function parseNaturalNote(raw) {
       seg = trip[2];
     } else if (!lead) {
       const c = seg.match(CONTEXT);
+      const st = c ? null : seg.match(STORE);
       if (c) {
         if (PRONOUN.test(c[1])) return null;   // 「我要買午餐」是在聊天
         sure = true;
         tags.push(c[1]);
         seg = seg.slice(c[0].length);
+      } else if (st && !NOT_STORE.test(st[1]) && !/^(?:帶|買)/.test(seg)) {
+        tags.push(st[1]);
+        seg = seg.slice(st[0].length);
       }
     }
 
@@ -287,6 +296,8 @@ export function parseNaturalNote(raw) {
       }
     } else if (trip) {
       // 已處理
+    } else if (category) {
+      if (!tags.length) tags.push(...lastTags);   // 沒寫動詞：沿用前一段的分類與場合
     } else if (!category) {
       if (!sure) return null;  // 第一段沒有「帶 / 買」又沒有「記得」：不是記事
       category = "todo";       // 「記得繳停車費」
@@ -299,6 +310,8 @@ export function parseNaturalNote(raw) {
         if (!tags.includes(p[2])) tags.push(p[2]);
       }
     }
+    lastTags = tags;
+    if (/^(?:的|了|到|過|完)/.test(seg)) return null;   // 「全聯買的」「買了」是在聊天
     const items = category === "todo" ? [seg] : seg.split(JOIN);
     for (let item of items) {
       item = item.replace(MEASURE, "").trim();

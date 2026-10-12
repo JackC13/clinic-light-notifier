@@ -396,3 +396,14 @@ test("notes: 「東西要做什麼」→ 做", () => {
   for (const t of ["我要比價", "要洗澡了", "車子要保養了嗎", "你要問誰", "lego要不要比價"]) assert.equal(parseCommand(t), null, t);
   assert.deepEqual(n("學校要帶濕紙巾"), ["bring:濕紙巾（學校）"]);
 });
+
+test("notes: 店家 + 買", () => {
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(n("掏寶買 木耳粉撲"), ["buy:木耳粉撲（掏寶）"]);
+  assert.deepEqual(n("淘寶買木耳粉撲"), ["buy:木耳粉撲（淘寶）"]);
+  assert.deepEqual(n("去全聯買牛奶、衛生紙"), ["buy:牛奶（全聯）", "buy:衛生紙（全聯）"]);
+  assert.deepEqual(n("好市多買衛生紙跟水"), ["buy:衛生紙（好市多）", "buy:水（好市多）"]);
+  assert.deepEqual(n("蝦皮上買充電線"), ["buy:充電線（蝦皮）"]);
+  assert.deepEqual(n("學校要帶濕紙巾、水壺"), ["bring:濕紙巾（學校）", "bring:水壺（學校）"]);
+  for (const t of ["剛剛買麵", "全聯買的", "昨天買的麵很好吃", "我們去全聯買東西吧", "已經買了", "他買房子"]) assert.equal(parseCommand(t), null, t);
+});
