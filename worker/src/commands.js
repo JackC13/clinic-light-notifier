@@ -1,9 +1,9 @@
 // 解析群組裡的文字指令（純函式）
 //
-//   追蹤 25 戴季珊            用醫師名找今天的門診（可加院區、時段：追蹤 25 兒童 下午 戴季珊）
+//   追蹤 25 王小明            用醫師名找今天的門診（可加院區、時段：追蹤 25 兒童 下午 王小明）
 //   追蹤                      用按鈕選 院區 → 時段 → 診
 //   追蹤 25 <燈號頁網址>       直接用網址
-//   燈號 戴季珊               只查目前燈號，不追蹤
+//   燈號 王小明               只查目前燈號，不追蹤
 //   列表 / 取消 3 / 取消 全部 / 說明
 //   25                        選好診之後，回覆自己的號碼
 //
@@ -15,7 +15,7 @@ import { parseWhen } from "./when.js";
 const URL_RE = /https?:\/\/[^\s<>"'，。]+/i;
 const NUM_RE = /^(\d{1,4})號?$/;
 
-/** 把「25 兒童 下午 戴季珊」拆成號碼、院區、時段、醫師名 */
+/** 把「25 兒童 下午 王小明」拆成號碼、院區、時段、醫師名 */
 function parseTerms(tokens) {
   let number = null, hosp = null, ampm = null;
   const rest = [];
@@ -59,7 +59,7 @@ export function parseCommand(raw, now = Date.now()) {
 
   if (["燈號", "查燈號", "看燈號", "查"].includes(key)) {
     const terms = parseTerms(tokens);
-    if (!terms.doctor) return { cmd: "usage", reason: "格式：燈號 醫師名（例：燈號 戴季珊）" };
+    if (!terms.doctor) return { cmd: "usage", reason: "格式：燈號 醫師名（例：燈號 王小明）" };
     return { cmd: "lookup", hosp: terms.hosp, ampm: terms.ampm, doctor: terms.doctor };
   }
 
@@ -397,12 +397,12 @@ export const HELP = [
   "📋 看診燈號提醒（臺大醫院）",
   "輸入「選單」可以用按鈕操作",
   "",
-  "▶ 追蹤 25 戴季珊",
+  "▶ 追蹤 25 王小明",
   "  用醫師名找今天的門診，開始追蹤 25 號",
-  "  可指定院區、時段：追蹤 25 兒童 下午 戴季珊",
+  "  可指定院區、時段：追蹤 25 兒童 下午 王小明",
   "▶ 追蹤",
   "  用按鈕選 院區 → 時段 → 診，再輸入號碼",
-  "▶ 燈號 戴季珊",
+  "▶ 燈號 王小明",
   "  只查目前燈號，不追蹤",
   "▶ 列表",
   "▶ 取消 3　/　取消 全部",

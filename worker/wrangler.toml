@@ -17,8 +17,6 @@ binding = "IMAGES"
 id = "83b4b8ba12a9437b90386232de48f52b"
 
 [vars]
-# 允許下指令的聊天室（群組 C… / 個人 U…），逗號分隔
-ALLOWED_CHAT_IDS = "C1e23fee597d0a7a4bc4d0a514ddfa46f,U6bd4189c693945ecf81247047cfcf17f"
 # 用醫師名搜尋時，沒指定院區就查這些院區（CH 兒童醫院、T0 總院）
 SEARCH_HOSPITALS = "CH,T0"
 # 剩幾號時通知
@@ -29,3 +27,4 @@ MAX_HOURS = "8"
 # 機密用 wrangler secret put 設定，不要寫在這裡：
 #   LINE_CHANNEL_ACCESS_TOKEN
 #   LINE_CHANNEL_SECRET
+#   ALLOWED_CHAT_IDS   允許下指令的聊天室（群組 C… / 個人 U…），逗號分隔；沒設定時機器人只會回報聊天室 ID

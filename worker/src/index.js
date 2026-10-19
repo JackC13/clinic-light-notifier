@@ -474,8 +474,8 @@ async function cancel(cmd, ctx) {
 
 const HINTS = {
   ai: textMsg("🤖 開頭打「AI」再接問題，或在群組 @機器人：\n　AI 明天要帶什麼？\n　AI 幫我記週五要買牛奶和吐司\n　AI 小孩發燒 38 度要注意什麼？"),
-  lookup: textMsg("🔎 直接輸入「燈號 醫師名」\n例：燈號 戴季珊"),
-  track: textMsg("🩺 直接輸入「追蹤 號碼 醫師名」最快\n例：追蹤 25 戴季珊\n\n或用按鈕一步一步選：", [quickText("用按鈕選", "追蹤")]),
+  lookup: textMsg("🔎 直接輸入「燈號 醫師名」\n例：燈號 王小明"),
+  track: textMsg("🩺 直接輸入「追蹤 號碼 醫師名」最快\n例：追蹤 25 王小明\n\n或用按鈕一步一步選：", [quickText("用按鈕選", "追蹤")]),
   note: textMsg([
     "✏️ 直接打字就能記：",
     "　帶保鮮盒、買麵、買晚餐",
