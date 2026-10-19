@@ -88,11 +88,20 @@ export function onReading(row, current, cfg, now, byCheckin = !!row.by_checkin) 
   const remaining = my - current;
   if (remaining <= 0) {
     if (byCheckin) {
-      messages.push(
-        remaining === 0
-          ? `🔔 ${t}｜燈號到 ${current} 號了（此診依報到順序看診，請以現場叫號為準）`
-          : `🚨 ${t}｜燈號 ${current} 已超過你的 ${my} 號。此診依報到順序看診，不一定是過號：請確認是否已報到，或詢問護理站`,
-      );
+      // 依報到順序看診：燈號會亂跳，超過號碼不代表輪到或過號 → 只提醒一次，繼續追蹤
+      // （結束追蹤交給燈號頁：看診中、或報到後從候診清單消失；或超過 MAX_HOURS）
+      const sent = parseSent(row.sent);
+      if (!sent.has(0)) {
+        sent.add(0);
+        update.sent = [...sent].join(",");
+        messages.push(
+          remaining === 0
+            ? `🔔 ${t}｜燈號到 ${current} 號了（此診依報到順序看診，請以現場叫號為準，會繼續追蹤）`
+            : `ℹ️ ${t}｜燈號 ${current} 超過你的 ${my} 號，但此診依報到順序看診，不一定是過號：請確認已報到，會繼續追蹤`,
+        );
+      }
+      update.next_check_at = now + cfg.nearMinutes * MIN - SLACK;
+      return { update, messages, done: false };
     } else {
       messages.push(
         remaining === 0
@@ -245,6 +254,27 @@ export function onDetail(row, d, byCheckin, cfg, now) {
     next(started ? cfg.nearMinutes : cfg.farMinutes); // 還沒報到：每分鐘看，才抓得到報到的那一刻
   }
   return { update, messages, done: false, handled: true };
+}
+
+/**
+ * 號碼判斷說「到了 / 過號」（done=true）時，用燈號頁的候診清單再確認一次：
+ * 你的號碼還在清單上、而且不是看診中 → 燈號只是跳號（多半是沒標示的報到順序診），繼續追蹤。
+ * 燈號頁讀不到時沿用號碼判斷。
+ */
+export function keepIfWaiting(base, row, d, cfg, now) {
+  if (!base.done || !d) return base;
+  const me = d.statuses.find((s) => s.n === row.my_number);
+  if (!me || me.status === "oncall") return base;
+  const update = { ...base.update, next_check_at: now + cfg.nearMinutes * MIN - SLACK };
+  const sent = parseSent(update.sent ?? row.sent);
+  const messages = [];
+  // 未報到的情況交給 onDetail 的「過號 / 提醒報到」一次性提醒，這裡不重複
+  if (me.status === "checkin" && !sent.has(0)) {
+    sent.add(0);
+    messages.push(`ℹ️ ${title(row)}｜燈號 ${base.update.last_number} 已超過你的 ${row.my_number} 號，但你已報到、仍在候診清單上，應該還沒叫到你，會繼續追蹤`);
+  }
+  update.sent = [...sent].join(",");
+  return { update, messages, done: false };
 }
 
 export function isExpired(row, cfg, now) {

@@ -8,7 +8,7 @@ import { aiProvider, chat, parseAiOutput, parseTaipeiTime, buildSystemPrompt } f
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
-import { loadConfig, onReading, onFailure, onDetail, isExpired, title, CHECKIN_NOTE } from "./monitor.js";
+import { loadConfig, onReading, onFailure, onDetail, isExpired, title, keepIfWaiting, CHECKIN_NOTE } from "./monitor.js";
 import { formatWhen } from "./when.js";
 
 const MAX_ACTIVE_PER_CHAT = 10;
@@ -1032,7 +1032,7 @@ async function evaluate(row, c, cfg, ctx) {
     return merge(r, onReading(row, c.number, cfg, ctx.now, true));
   }
 
-  const base = onReading(row, c.number, cfg, ctx.now, c.byCheckin);
+  const base = keepIfWaiting(onReading(row, c.number, cfg, ctx.now, c.byCheckin), row, d, cfg, ctx.now);
   if (!d || base.done) return base;
   const extra = onDetail(row, d, false, cfg, ctx.now);
   return { ...base, update: { ...extra.update, ...base.update }, messages: [...base.messages, ...extra.messages] };

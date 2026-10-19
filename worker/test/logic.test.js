@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseTable, parseDetail, parseDetailUrl, currentAmpm, hospitalByAlias } from "../src/ntuh.js";
 import { parseCommand } from "../src/commands.js";
-import { loadConfig, onReading, onFailure, onDetail, isExpired, title } from "../src/monitor.js";
+import { loadConfig, onReading, onFailure, onDetail, isExpired, title, keepIfWaiting } from "../src/monitor.js";
 
 const cfg = loadConfig({});
 const NOW = 1_800_000_000_000;
@@ -121,11 +121,50 @@ test("checkin: 看診途中改為依報到順序 → 提醒一次", () => {
 test("checkin: 燈號變小不警告", () => {
   assert.deepEqual(onReading(row({ last_number: 20, by_checkin: 1, sent: "10,5,2" }), 12, cfg, NOW, true).messages, []);
 });
-test("checkin: 超過號碼時提醒確認報到，不說過號", () => {
+test("checkin: 超過號碼時提醒確認報到，不說過號，且繼續追蹤", () => {
   const r = onReading(row({ last_number: 24, by_checkin: 1, sent: "10,5,2" }), 27, cfg, NOW, true);
-  assert.equal(r.done, true);
+  assert.equal(r.done, false);
   assert.match(r.messages[0], /不一定是過號/);
+  assert.match(r.messages[0], /繼續追蹤/);
   assert.doesNotMatch(r.messages[0], /立刻到診間/);
+  assert.equal(r.update.next_check_at, NOW + 60000 - 5000);
+});
+test("checkin: 燈號在你的號碼上下亂跳，只提醒一次、不結束", () => {
+  const r1 = onReading(row({ last_number: 24, by_checkin: 1, sent: "10,5,2" }), 27, cfg, NOW, true);
+  const r2 = onReading(row({ last_number: 27, by_checkin: 1, sent: r1.update.sent }), 12, cfg, NOW, true);
+  const r3 = onReading(row({ last_number: 12, by_checkin: 1, sent: r1.update.sent }), 30, cfg, NOW, true);
+  assert.equal(r2.done, false);
+  assert.equal(r3.done, false);
+  assert.deepEqual(r3.messages, []);
+});
+test("keepIfWaiting: 號碼過了但你已報到、仍在候診清單 → 繼續追蹤並說明", () => {
+  const r0 = row({ last_number: 24 });
+  const base = onReading(r0, 27, cfg, NOW);
+  assert.equal(base.done, true);
+  const d = { statuses: [{ n: 26, status: "oncall" }, { n: 25, status: "checkin" }] };
+  const r = keepIfWaiting(base, r0, d, cfg, NOW);
+  assert.equal(r.done, false);
+  assert.match(r.messages[0], /仍在候診清單/);
+  assert.equal(r.update.last_number, 27);
+  // 下一輪不重複提醒
+  const again = keepIfWaiting(onReading(row({ last_number: 27, sent: r.update.sent }), 28, cfg, NOW), row({ sent: r.update.sent }), d, cfg, NOW);
+  assert.equal(again.done, false);
+  assert.deepEqual(again.messages, []);
+});
+test("keepIfWaiting: 未報到仍在清單 → 繼續追蹤，提醒交給 onDetail", () => {
+  const r0 = row({ last_number: 24 });
+  const r = keepIfWaiting(onReading(r0, 27, cfg, NOW), r0, { statuses: [{ n: 25, status: "notin" }] }, cfg, NOW);
+  assert.equal(r.done, false);
+  assert.deepEqual(r.messages, []);
+});
+test("keepIfWaiting: 看診中、不在清單、或讀不到燈號頁 → 照號碼結束", () => {
+  const r0 = row({ last_number: 24 });
+  const base = () => onReading(r0, 27, cfg, NOW);
+  assert.equal(keepIfWaiting(base(), r0, { statuses: [{ n: 25, status: "oncall" }] }, cfg, NOW).done, true);
+  assert.equal(keepIfWaiting(base(), r0, { statuses: [{ n: 30, status: "checkin" }] }, cfg, NOW).done, true);
+  assert.equal(keepIfWaiting(base(), r0, null, cfg, NOW).done, true);
+  const notDone = onReading(row({ last_number: 10 }), 20, cfg, NOW);
+  assert.equal(keepIfWaiting(notDone, r0, { statuses: [] }, cfg, NOW), notDone);
 });
 
 // ── 個別燈號頁（真實頁面）與報到順序 ──
