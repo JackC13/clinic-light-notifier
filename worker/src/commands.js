@@ -207,6 +207,9 @@ const QTY = /^(?:很多|好多|超多|一堆|多一點|多點|一點點?|一些|
 const STORE = /^(?:去|到|在|上)?\s*([^\s，,、]{1,6}?)\s*(?:上|去)?\s*(?=買\s*\S)/;
 const NOT_STORE = /剛|已|昨|有|沒|也|都|還|再|又|才|就|先|會|想|不|了|我|你|他|她|大家|要|得|記/;
 
+// 括號補充說明（全形、半形混用也算）
+const PAREN = /\s*[（(][^）)]*[）)]?/g;
+
 // 「lego要比價」：某樣東西 + 要 + 待辦動詞
 const TODO_VERBS = "比價|比較|退貨|退款|退|換貨|換|送修|修理|修|保養|驗車|洗|繳費|繳|付款|轉帳|寄|收|還|歸還|預約|掛號|訂位|訂|報名|領|取貨|拿|查|問|整理|清|丟|回覆|回電|聯絡|簽名|簽|填|印|列印|充電|加油|續約|取消|退訂|備份|更新|充值|儲值|加值";
 const TODO_RE = new RegExp(`^(?:([^\\s，,、]{1,12}?)\\s*)?(?:要|得|需要|該)\\s*((?:${TODO_VERBS}).{0,20})$`);
@@ -312,12 +315,15 @@ export function parseNaturalNote(raw) {
     }
     lastTags = tags;
     if (/^(?:的|了|到|過|完)/.test(seg)) return null;   // 「全聯買的」「買了」是在聊天
-    const items = category === "todo" ? [seg] : seg.split(JOIN);
+    const items = category === "todo" || /[（(]/.test(seg) ? [seg] : seg.split(JOIN);
     for (let item of items) {
       item = item.replace(MEASURE, "").trim();
       if (!item) return null;
-      if (category !== "todo" && PEOPLE.test(item)) return null;
-      if (!sure && (item.length > 12 || CHATTY.test(item.replace(QTY, "")))) return null;
+      // 括號裡的補充說明、「新的」不算在判斷內：「新的Elomet（異膚的類固醇藥膏）」
+      const core = item.replace(PAREN, "").replace(QTY, "").replace(/^(?:新的|新|舊的|備用的?)/, "");
+      if (!core) return null;
+      if (category !== "todo" && PEOPLE.test(core)) return null;
+      if (!sure && (core.length > 12 || CHATTY.test(core))) return null;
       const t = (prefix + (tags.length ? `${item}（${tags.join("、")}）` : item)).slice(0, 30);
       if (!entries.some((e) => e.category === category && e.text === t)) entries.push({ category, text: t });
     }

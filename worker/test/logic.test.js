@@ -446,3 +446,11 @@ test("notes: 店家 + 買", () => {
   assert.deepEqual(n("學校要帶濕紙巾、水壺"), ["bring:濕紙巾（學校）", "bring:水壺（學校）"]);
   for (const t of ["剛剛買麵", "全聯買的", "昨天買的麵很好吃", "我們去全聯買東西吧", "已經買了", "他買房子"]) assert.equal(parseCommand(t), null, t);
 });
+
+test("notes: 括號補充說明", () => {
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(n("帶新的Elomet(異膚的類固醇藥膏）"), ["bring:新的Elomet(異膚的類固醇藥膏）"]);
+  assert.deepEqual(n("帶Elomet（擦臉用的）、健保卡"), ["bring:Elomet（擦臉用的）", "bring:健保卡"]);
+  assert.deepEqual(n("買牛奶（全脂和低脂各一）"), ["buy:牛奶（全脂和低脂各一）"]);
+  assert.equal(parseCommand("帶小孩（老大）去公園"), null);
+});
