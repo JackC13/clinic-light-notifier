@@ -618,13 +618,15 @@ async function noteAdd(cmd, ctx) {
   const results = await db.batch(entries.map((e) =>
     db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)").bind(ctx.chatId, e.category, e.text, ctx.now)));
 
-  // 依分類整理：「🎒 帶：保鮮盒｜🛒 買：麵、晚餐」
-  const parts = NOTE_CATEGORIES
-    .map((c) => ({ c, texts: entries.filter((e) => e.category === c.key).map((e) => e.text) }))
-    .filter((x) => x.texts.length)
-    .map(({ c, texts }) => `${c.icon} ${c.name}：${texts.join("、")}`);
-  let head = `已記下 ${parts.join("｜")}`;
   const ids = results.map((r) => r.meta.last_row_id);
+  // 依分類整理：「🎒 帶：保鮮盒｜🛒 買：麵、晚餐」（提醒文字用，不含編號）
+  const group = (fmt) => NOTE_CATEGORIES
+    .map((c) => ({ c, items: entries.map((e, i) => ({ ...e, id: ids[i] })).filter((e) => e.category === c.key) }))
+    .filter((x) => x.items.length)
+    .map(({ c, items }) => `${c.icon} ${c.name}：${items.map(fmt).join("、")}`);
+  const parts = group((e) => e.text);
+  // 回覆附上編號，不用再查一次就能「完成 12」
+  let head = `已記下 ${group((e) => `#${e.id} ${e.text}`).join("｜")}`;
   if (cmd.remindAt) {
     if (cmd.remindAt <= ctx.now + 30_000) {
       head += `\n（${formatWhen(cmd.remindAt, ctx.now)} 已經過了，沒有設提醒）`;
@@ -639,10 +641,12 @@ async function noteAdd(cmd, ctx) {
     quickPostback(ids.length > 1 ? `📷 ${entries[i].text}` : "📷 附圖", { a: "photo", id }, `附圖給「${entries[i].text}」`));
   if (!cmd.natural) return notesReply(ctx, head, photoQuick);
 
-  // 口語觸發：簡短回覆，附「撤銷」按鈕（萬一是誤記）
+  // 口語觸發：簡短回覆，附「撤銷」與「完成」按鈕（快速回覆最多 13 個）
+  const doneQuick = ids.slice(0, 4).map((id, i) => quickText(`✔️ 完成 #${id} ${entries[i].text}`, `完成 ${id}`));
   return textMsg(head, [
     quickPostback("↩️ 撤銷", { a: "undo", ids }, "撤銷"),
-    ...photoQuick,
+    ...doneQuick,
+    ...photoQuick.slice(0, 4),
     quickText("📝 看記事", "記事"),
   ]);
 }
