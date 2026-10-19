@@ -29,7 +29,7 @@ function int(v, d) {
   return Number.isFinite(n) && n > 0 ? n : d;
 }
 
-/** 例：#3 戴季珊（兒童醫院 下午 01診）小孩 */
+/** 例：#3 王小明（兒童醫院 下午 01診）小孩 */
 export function title(row) {
   const where = [row.hosp && hospitalName(row.hosp), row.ampm && AMPM[row.ampm], row.room]
     .filter(Boolean)

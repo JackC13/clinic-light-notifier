@@ -8,7 +8,7 @@ import { loadConfig, onReading, onFailure, onDetail, isExpired, title, keepIfWai
 const cfg = loadConfig({});
 const NOW = 1_800_000_000_000;
 const row = (o = {}) => ({
-  id: 3, my_number: 25, label: null, doctor: "戴季珊", room: "01診", hosp: "CH", ampm: 2,
+  id: 3, my_number: 25, label: null, doctor: "王小明", room: "01診", hosp: "CH", ampm: 2,
   last_number: null, sent: "", fail_count: 0, fail_alerted: 0, drop_alerted: 0,
   created_at: NOW, next_check_at: NOW, ...o,
 });
@@ -30,8 +30,8 @@ test("ntuh: 解析真實列表", () => {
 });
 test("ntuh: 網址、院區別名、時段", () => {
   assert.deepEqual(
-    parseDetailUrl("https://reg.ntuh.gov.tw/WebReg/WebReg/ClinicCurrentLightNoDetail?ServiceIDSE=8049502&vHospitalCode=CH"),
-    { host: "reg.ntuh.gov.tw", sid: "8049502", hosp: "CH" });
+    parseDetailUrl("https://reg.ntuh.gov.tw/WebReg/WebReg/ClinicCurrentLightNoDetail?ServiceIDSE=1234567&vHospitalCode=CH"),
+    { host: "reg.ntuh.gov.tw", sid: "1234567", hosp: "CH" });
   assert.equal(parseDetailUrl("https://reg.ntuh.gov.tw/x"), null);
   assert.equal(hospitalByAlias("兒醫"), "CH");
   assert.equal(hospitalByAlias("台大"), "T0");
@@ -43,9 +43,9 @@ test("ntuh: 網址、院區別名、時段", () => {
 
 // ── 指令 ──
 test("command: 用醫師名追蹤", () => {
-  assert.deepEqual(parseCommand("追蹤 25 戴季珊"), { cmd: "add", number: 25, hosp: null, ampm: null, doctor: "戴季珊" });
-  assert.deepEqual(parseCommand("追蹤　戴季珊醫師 兒童 下午 25號"), { cmd: "add", number: 25, hosp: "CH", ampm: 2, doctor: "戴季珊" });
-  assert.deepEqual(parseCommand("追蹤 戴季珊"), { cmd: "add", number: null, hosp: null, ampm: null, doctor: "戴季珊" });
+  assert.deepEqual(parseCommand("追蹤 25 王小明"), { cmd: "add", number: 25, hosp: null, ampm: null, doctor: "王小明" });
+  assert.deepEqual(parseCommand("追蹤　王小明醫師 兒童 下午 25號"), { cmd: "add", number: 25, hosp: "CH", ampm: 2, doctor: "王小明" });
+  assert.deepEqual(parseCommand("追蹤 王小明"), { cmd: "add", number: null, hosp: null, ampm: null, doctor: "王小明" });
 });
 test("command: 按鈕流程與網址", () => {
   assert.deepEqual(parseCommand("追蹤"), { cmd: "guide", number: null, hosp: null, ampm: null, doctor: null });
@@ -54,7 +54,7 @@ test("command: 按鈕流程與網址", () => {
   assert.deepEqual(parseCommand(`追蹤 ${u} 25 小孩`), { cmd: "addUrl", url: u, number: 25, label: "小孩" });
 });
 test("command: 燈號 / 列表 / 取消 / 號碼 / 閒聊", () => {
-  assert.deepEqual(parseCommand("燈號 戴季珊"), { cmd: "lookup", hosp: null, ampm: null, doctor: "戴季珊" });
+  assert.deepEqual(parseCommand("燈號 王小明"), { cmd: "lookup", hosp: null, ampm: null, doctor: "王小明" });
   assert.equal(parseCommand("燈號").cmd, "usage");
   assert.deepEqual(parseCommand("列表"), { cmd: "list" });
   assert.deepEqual(parseCommand("取消 #3"), { cmd: "cancel", id: 3 });
@@ -67,8 +67,8 @@ test("command: 燈號 / 列表 / 取消 / 號碼 / 閒聊", () => {
 
 // ── 監控邏輯 ──
 test("monitor: 標題", () => {
-  assert.equal(title(row()), "#3 戴季珊（兒童醫院 下午 01診）");
-  assert.equal(title(row({ label: "小孩" })), "#3 戴季珊（兒童醫院 下午 01診） 小孩");
+  assert.equal(title(row()), "#3 王小明（兒童醫院 下午 01診）");
+  assert.equal(title(row({ label: "小孩" })), "#3 王小明（兒童醫院 下午 01診） 小孩");
 });
 test("monitor: 尚未開始看診安靜等待", () => {
   const r = onReading(row(), null, cfg, NOW);
