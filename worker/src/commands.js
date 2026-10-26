@@ -116,7 +116,10 @@ export function parseCommand(raw, now = Date.now()) {
     return cat ? { cmd: "notes", category: cat } : null;
   }
   // 單獨問「買什麼」「要帶什麼」「出國要帶什麼」→ 列出該分類
-  const ask = text.match(/^(?:要)?(出國\s*(?:要)?\s*帶|出國\s*(?:要)?\s*買|買|帶)\s*(?:什麼|甚麼|啥|東西|哪些)\s*[?？]?$/);
+  // 「我有要買什麼」「我們還要帶什麼？」「有什麼要買嗎」也算
+  const q = text.replace(/\s+/g, "").replace(/(?:嗎|呢|啊|勒|咧)?[?？!！。~～]*$/, "");
+  const ask = q.match(/^(?:我們?|大家|我家)?(?:還|還有)?(?:有)?(?:要|需要|得)?(出國(?:要)?帶|出國(?:要)?買|買|帶)(?:的)?(?:什麼|甚麼|啥|東西|哪些)(?:東西)?$/)
+    ?? q.match(/^(?:我們?|大家)?(?:還)?有(?:什麼|甚麼|啥|哪些)(?:東西)?(?:要|需要|得)?(出國(?:要)?帶|出國(?:要)?買|買|帶)(?:的)?$/);
   if (ask) return { cmd: "notes", category: /出國/.test(ask[1]) ? "trip" : ask[1] === "買" ? "buy" : "bring" };
   if (["完成", "勾", "done"].includes(key)) {
     const ids = tokens.join(" ").match(/\d+/g)?.map(Number) ?? [];

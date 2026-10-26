@@ -462,3 +462,11 @@ test("notes: 英文品名不算太長", () => {
   assert.deepEqual(n("帶 iPad 充電線"), ["bring:iPad 充電線"]);
   for (const t of ["買房子好貴", "買了晚餐", "買一台新的車子來載全家出去玩比較方便"]) assert.equal(parseCommand(t), null, t);
 });
+
+test("notes: 問「要買什麼」的各種說法", () => {
+  for (const [t, c] of [["我有要買什麼", "buy"], ["我有要買什麼？", "buy"], ["我們還要帶什麼", "bring"], ["有什麼要買嗎", "buy"],
+    ["還有什麼要帶的？", "bring"], ["要買的東西", "buy"], ["我要買什麼呢", "buy"], ["出國要帶什麼", "trip"]]) {
+    assert.deepEqual(parseCommand(t), { cmd: "notes", category: c }, t);
+  }
+  assert.equal(parseCommand("你要買什麼"), null);
+});
