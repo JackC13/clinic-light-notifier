@@ -481,3 +481,11 @@ test("ai: 叫小弟、辦事小弟", () => {
   assert.equal(parseCommand("小弟弟今天很乖"), null);
   assert.equal(parseCommand("我小弟今天來"), null);
 });
+
+test("ai: 誒小弟 / 嗨小弟", () => {
+  assert.deepEqual(parseCommand("誒小弟你在嗎"), { cmd: "ai", text: "你在嗎" });
+  assert.deepEqual(parseCommand("誒 小弟 你在嗎"), { cmd: "ai", text: "你在嗎" });
+  assert.deepEqual(parseCommand("嗨小弟"), { cmd: "ai", text: "" });
+  assert.deepEqual(parseCommand("hey 小弟 明天要帶什麼"), { cmd: "ai", text: "明天要帶什麼" });
+  assert.deepEqual(parseCommand("那個辦事小弟，幫我記買牛奶"), { cmd: "ai", text: "幫我記買牛奶" });
+});

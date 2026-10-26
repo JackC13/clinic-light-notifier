@@ -36,8 +36,8 @@ export function parseCommand(raw, now = Date.now()) {
   const key = head.toLowerCase();
 
   // AI 小幫手：「AI 明天要帶什麼」「問AI …」「小幫手 …」「小弟 …」「辦事小弟 …」「欸小弟 …」
-  if (/^(?:嘿|欸|ㄟ|喂|問)?\s*(?:ai|小幫手|辦事小弟|小弟)[!！~～?？]*$/i.test(text)) return { cmd: "ai", text: "" };
-  const ai = text.match(/^(?:嘿|欸|ㄟ|喂|問)?\s*(?:ai|AI|Ai|小幫手|辦事小弟|小弟(?!弟))(?:[\s:：,，、!！~～]+|(?=[^\x00-\x7F]))([\s\S]+)$/);
+  if (/^(?:誒|欸|ㄟ|诶|嘿|喂|嗨|哈囉|hi|hey|那個|問)?[\s,，~～]*\s*(?:ai|小幫手|辦事小弟|小弟)[!！~～?？]*$/i.test(text)) return { cmd: "ai", text: "" };
+  const ai = text.match(/^(?:誒|欸|ㄟ|诶|嘿|喂|嗨|哈囉|hi|hey|那個|問)?[\s,，~～]*\s*(?:ai|AI|Ai|小幫手|辦事小弟|小弟(?!弟))(?:[\s:：,，、!！~～]+|(?=[^\x00-\x7F]))([\s\S]+)$/i);
   if (ai) return { cmd: "ai", text: ai[1].trim() };
 
   const num = text.match(NUM_RE);
