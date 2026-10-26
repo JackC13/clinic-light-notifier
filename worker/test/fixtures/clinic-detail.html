@@ -1,0 +1,772 @@
+
+
+
+
+<style>
+    .expected-item {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        margin-right: 16px;
+        line-height: 1.1;
+    }
+
+        .expected-item .number {
+            font-size: 2.0rem;
+            font-weight: bold;
+        }
+
+        .expected-item .type {
+            font-size: 1.25rem;
+            color: #666;
+        }
+</style>
+
+<html translate="no" lang="zh-TW">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="../lib/bootstrap/css/bootstrap.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <link rel="stylesheet" href="../css/child_style.css" />
+        <link rel="stylesheet" href="../css/child_main_style.css">
+        <link rel="stylesheet" href="../css/child_first_clinic_form_style.css">
+        <link rel="stylesheet" href="../css/child_checkbox.css">
+
+    <title>臺大醫院網路掛號系統</title>
+    <link rel="icon" type="image/x-icon" href="../img/logo.ico" />
+</head>
+
+<body class="mt-3">
+    <div id="main">
+        <div class="main-container">
+            <div class="title">
+                <a href="#C" id="AC" name="C" title="資料內容區" accesskey="C">:::</a>
+                當日看診進度查詢
+            </div>
+                <div class="row">
+                    <div class="col-md-6 col-12">
+                        <div class="warning-word">※實際看診順序依現場燈號為準，畫面每分鐘更新一次。</div>
+                    </div>
+                    <div class="col-md-6 col-12 text-md-end">
+                        <div class="warning-word">
+                            最後更新時間:2026-09-30 14:47:02
+                        </div>
+                    </div>
+                </div>
+                <div class="card mt-0 mt-md-3">
+                    <div class="card-body">
+
+                        <div class="clinic-modal-progress">
+                            <div class="row g-2">
+                                <div class="col-xl col-md-6 col-12">
+                                    <div class="room-number">
+                                        兒童醫院 05診
+                                    </div>
+                                    <div class="doc-name">
+                                        吳振吉
+                                    </div>
+                                </div>
+                                <!--目前燈號-->
+                                <div class="col-xl-2 col-md-6 col-12">
+                                    <div class="now-number">
+                                        <div class="title">目前燈號</div>
+                                        <div class="number">
+
+                                            002   
+                                        </div>
+                                        <div class="according-to-order-inside">
+                                            <text>順號</text>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!--已叫最大號-->
+                                <div class="col-xl-2 col-md-6 col-12">
+                                    <div class="biggest-number">
+                                        <div class="title">已叫最大號</div>
+                                        <div class="number">
+
+                                            003   
+                                        </div>
+                                    </div>
+                                </div>
+                                <!--預計叫號--> 
+                                <div class="col-xl-4 col-md-6 col-12"> 
+                                    <div class="next-number">
+                                        <div class="title">
+                                            預計叫號
+                                            
+                                        </div>
+                                            <div class="expected-inline mt-1">
+                                                    <span class="expected-item">
+                                                        <span class="number">002</span>
+                                                        <span class="type">(順號)</span>
+                                                    </span>
+                                                    <span class="expected-item">
+                                                        <span class="number">003</span>
+                                                        <span class="type">(順號)</span>
+                                                    </span>
+                                                    <span class="expected-item">
+                                                        <span class="number">079</span>
+                                                        <span class="type">(敬老號)</span>
+                                                    </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            <div class="clinic-progress">
+                                <!--所有燈號狀態-->
+                                <div class="title mb-2">
+                                    所有燈號狀態
+                                </div>
+                                <div class="row mx-0 g-2 align-items-center">
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            2
+                                                            <!--看診中-->
+                                                            <div class="onCall-tag">
+                                                                看診中
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            3
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            4
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            5
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            7
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            8
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            13
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            14
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            15
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            17
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            18
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            19
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            22
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            23
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            24
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            25
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            27
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            28
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            29
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            31
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            32
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            33
+                                                            <div class="first-tag">
+                                                                初診
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            34
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            35
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            37
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            38
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            39
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            40
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            42
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            44
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            46
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            47
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            48
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            49
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            50
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            51
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            52
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            53
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            54
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            55
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            56
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            57
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            58
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            59
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            60
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            68
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            69
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            70
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            71
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            72
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            73
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            74
+                                                            <div class="not-checkIn-tag">
+                                                                未報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            76
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            77
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            79
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            80
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                            <div class="col-xl-1 col-md-3  col-4">
+
+                                                        <div class="progress-number">
+                                                            81
+                                                            <div class="checkIn-tag">
+                                                                已報到
+                                                            </div>
+                                                        </div>
+
+                                            </div>
+                                </div>
+                            </div>
+                            <div class="number-explain">
+                                <div class="row g-2">
+                                    <div class="col-md-auto col-12">
+                                        <!--燈號解說-->
+                                        <div class="title">
+                                            燈號 <div class="d-md-block d-none"></div>
+                                            解說
+                                        </div>
+                                    </div>
+                                    <div class="col-md col-12">
+                                        <div class="row g-2">
+                                            <div class="col-auto">
+                                                <!--初診-->
+                                                <div class="first-tag">
+                                                    初診
+                                                </div>
+                                            </div>
+                                            <div class="col-md col-12">本院初診，在本院尚無病歷資料，請先至門診掛號櫃台填寫初診資料。</div>
+                                        </div>
+                                        <div class="row mt-2 g-2">
+                                            <!--未報到-->
+                                            <div class="col-auto">
+                                                <div class="not-checkIn-tag">
+                                                    未報到
+                                                </div>
+                                            </div>
+                                            <div class="col-md-auto col-12">尚未報到及就診</div>
+                                            <!--看診中-->
+                                            <div class="col-auto">
+                                                <div class="onCall-tag">
+                                                    看診中
+                                                </div>
+                                            </div>
+                                            <div class="col-md-auto col-12">
+                                                看診中
+                                            </div>
+                                        </div>
+                                        <!--已報到-->
+                                        <div class="row  mt-2 g-2">
+                                            <div class="col-auto">
+                                                <div class="checkIn-tag">
+                                                    已報到
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4 col-12">
+                                                已報到尚未看診
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row mt-2 align-items-center g-2">
+                                    <div class="col-md-auto col-12">
+                                        <div class="title">其他</div>
+                                    </div>
+                                    <!--若您的燈號已小於最大燈號代表您已過號，請盡速插卡報到。-->
+                                    <div class="col-md col-12">
+                                        若您的燈號已小於最大燈號代表您已過號，請盡速插卡報到。
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+        </div>
+    </div>
+<script type="text/javascript"  src="/2W1rdd/WN/vn/KYoy/HY5vEqzKjF/ctVafbVfJVXtVt/FDseAg/PzJ0/C0l4dSg"></script></body>
+</html>
+
+<script>
+    setInterval(function () {
+        location.reload();
+    }, 60000); // 每隔60秒, 自動更新
+</script>
