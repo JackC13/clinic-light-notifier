@@ -207,6 +207,9 @@ const QTY = /^(?:很多|好多|超多|一堆|多一點|多點|一點點?|一些|
 const STORE = /^(?:去|到|在|上)?\s*([^\s，,、]{1,6}?)\s*(?:上|去)?\s*(?=買\s*\S)/;
 const NOT_STORE = /剛|已|昨|有|沒|也|都|還|再|又|才|就|先|會|想|不|了|我|你|他|她|大家|要|得|記/;
 
+// 長度：英文 / 數字整個字算 1，空白不算（「Puriluna 夢境沐浴露 系列」= 8）
+const wordLength = (t) => t.replace(/[A-Za-z0-9][A-Za-z0-9.'+&-]*/g, "A").replace(/\s+/g, "").length;
+
 // 括號補充說明（全形、半形混用也算）
 const PAREN = /\s*[（(][^）)]*[）)]?/g;
 
@@ -219,7 +222,7 @@ const PRONOUN = /我|你|他|她|大家/;
 // 「濕紙巾去學校」「健保卡到醫院」：句尾的地點
 const PLACE = /^(.+?)\s*(?:去|到)\s*(\S{1,8})$/;
 // 「月餅跟餅乾」
-const JOIN = /(?<=\S)\s*(?:跟|和|還有|以及|與|及)\s*(?=\S)/;
+const JOIN = /(?<=\S)(?<![溫柔調暖平祥緩總附])\s*(?:跟|和|還有|以及|與|及)\s*(?=\S)/;
 // 帶「人」去某處是在聊天：「帶小孩去公園」「帶他去看醫生」
 const PEOPLE = /^(?:小孩|孩子|小朋友|兒子|女兒|寶寶|弟弟|妹妹|哥哥|姐姐|姊姊|老婆|老公|媽媽?|爸爸?|阿公|阿嬤|奶奶|爺爺|外婆|外公|狗狗?|貓咪?|他|她|你|我|大家)們?$/;
 
@@ -323,7 +326,7 @@ export function parseNaturalNote(raw) {
       const core = item.replace(PAREN, "").replace(QTY, "").replace(/^(?:新的|新|舊的|備用的?)/, "");
       if (!core) return null;
       if (category !== "todo" && PEOPLE.test(core)) return null;
-      if (!sure && (core.length > 12 || CHATTY.test(core))) return null;
+      if (!sure && (wordLength(core) > 14 || CHATTY.test(core))) return null;
       const t = (prefix + (tags.length ? `${item}（${tags.join("、")}）` : item)).slice(0, 30);
       if (!entries.some((e) => e.category === category && e.text === t)) entries.push({ category, text: t });
     }

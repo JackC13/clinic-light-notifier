@@ -454,3 +454,11 @@ test("notes: 括號補充說明", () => {
   assert.deepEqual(n("買牛奶（全脂和低脂各一）"), ["buy:牛奶（全脂和低脂各一）"]);
   assert.equal(parseCommand("帶小孩（老大）去公園"), null);
 });
+
+test("notes: 英文品名不算太長", () => {
+  const n = (t) => parseCommand(t)?.entries?.map((e) => `${e.category}:${e.text}`);
+  assert.deepEqual(n("買 Puriluna 夢境沐浴露 系列"), ["buy:Puriluna 夢境沐浴露 系列"]);
+  assert.deepEqual(n("買 Dr.Wu 杏仁酸溫和煥膚精華"), ["buy:Dr.Wu 杏仁酸溫和煥膚精華"]);
+  assert.deepEqual(n("帶 iPad 充電線"), ["bring:iPad 充電線"]);
+  for (const t of ["買房子好貴", "買了晚餐", "買一台新的車子來載全家出去玩比較方便"]) assert.equal(parseCommand(t), null, t);
+});
