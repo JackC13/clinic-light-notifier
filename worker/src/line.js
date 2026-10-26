@@ -77,6 +77,21 @@ export function push(env, to, texts) {
   });
 }
 
+/** 取得成員的顯示名稱（群組 / 多人聊天室 / 一對一）；拿不到回傳 null。不佔推播額度 */
+export async function getMemberName(env, chatId, userId) {
+  if (!userId) return null;
+  const path = chatId.startsWith("C") ? `/v2/bot/group/${chatId}/member/${userId}`
+    : chatId.startsWith("R") ? `/v2/bot/room/${chatId}/member/${userId}`
+    : `/v2/bot/profile/${userId}`;
+  try {
+    const res = await fetch(apiBase(env) + path, { headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` } });
+    if (!res.ok) return null;
+    return (await res.json()).displayName ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** 下載使用者傳來的圖片（原圖與預覽圖） */
 export async function getContent(env, messageId, preview = false) {
   const base = env.LINE_DATA_BASE || "https://api-data.line.me";

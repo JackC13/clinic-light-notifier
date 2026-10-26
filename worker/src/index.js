@@ -4,12 +4,13 @@
 
 import { parseCommand, HELP, NOTE_HELP, NOTE_CATEGORIES, AI_HELP } from "./commands.js";
 import { verifySignature, reply, push, textMsg, quickPostback, quickText, getContent, imageMsg, quickCamera, quickCameraRoll, showLoading } from "./line.js";
-import { aiProvider, chat, parseAiOutput, parseTaipeiTime, buildSystemPrompt } from "./ai.js";
+import { aiProvider, chat, parseAiOutput, parseTaipeiTime, buildSystemPrompt, transcribe, toBase64 } from "./ai.js";
 import {
   HOSPITALS, AMPM, hospitalName, currentAmpm, fetchTable, fetchDetail, diagnose, parseDetailUrl, detailUrl, baseUrl,
 } from "./ntuh.js";
 import { loadConfig, onReading, onFailure, onDetail, isExpired, title, keepIfWaiting, CHECKIN_NOTE } from "./monitor.js";
 import { formatWhen } from "./when.js";
+import { logHistory, historyReply, recentHistoryText } from "./history.js";
 
 const MAX_ACTIVE_PER_CHAT = 10;
 const MAX_PER_TICK = 30;
@@ -70,8 +71,13 @@ async function handleEvent(event, env, origin) {
       // 一對一聊天：不是指令的話都交給 AI
       if (!cmd && src.type === "user" && aiProvider(env)) cmd = { cmd: "ai", text: m.text.trim() };
     }
+    // 回覆（引用）某則訊息時，把被引用的訊息帶給 AI（例如引用一張照片說「小弟 幫我看」）
+    if (cmd?.cmd === "ai" && m.quotedMessageId) cmd.quotedMessageId = m.quotedMessageId;
   }
   else if (event.type === "message" && event.message?.type === "image") cmd = { cmd: "image", messageId: event.message.id };
+  else if (event.type === "message" && event.message?.type === "audio") {
+    cmd = { cmd: "audio", messageId: event.message.id, duration: event.message.duration ?? 0 };
+  }
   else if (event.type === "postback") {
     try {
       cmd = { cmd: "postback", data: JSON.parse(event.postback.data) };
@@ -83,13 +89,13 @@ async function handleEvent(event, env, origin) {
 
   const allowed = allowedChats(env);
   if (allowed.length === 0) {
-    if (cmd.cmd === "number" || cmd.cmd === "image") return;
+    if (cmd.cmd === "number" || cmd.cmd === "image" || cmd.cmd === "audio") return;
     return reply(env, event.replyToken,
       `🔒 尚未設定授權聊天室。\n這個聊天室的 ID：\n${chatId}\n請加到 ALLOWED_CHAT_IDS 後重新部署。`);
   }
   if (!allowed.includes(chatId)) return;
 
-  const ctx = { env, origin, chatId, userId: src.userId ?? "", now: Date.now(), tables: new Map() };
+  const ctx = { env, origin, chatId, userId: src.userId ?? "", isDirect: src.type === "user", now: Date.now(), tables: new Map() };
   let out;
   try {
     out = await runCommand(cmd, ctx);
@@ -131,6 +137,8 @@ async function runCommand(cmd, ctx) {
     case "photoAsk": return photoAsk(cmd.id, ctx);
     case "photoShow": return photoShow(cmd.id, ctx);
     case "image": return onImage(cmd, ctx);
+    case "audio": return onVoice(cmd, ctx);
+    case "history": return historyReply(ctx, cmd);
     case "diagnose": {
       const hosp = cmd.hosp ?? "CH";
       const ampm = cmd.ampm ?? currentAmpm(ctx.now);
@@ -332,9 +340,10 @@ async function onPostback(d, ctx) {
   if (d.a === "undo" && Array.isArray(d.ids) && d.ids.length) {
     const ids = d.ids.map(Number).filter(Number.isInteger).slice(0, 20);
     const marks = ids.map(() => "?").join(",");
-    const { results: rows } = await ctx.env.DB.prepare(`SELECT image_key FROM notes WHERE chat_id = ? AND id IN (${marks})`)
+    const { results: rows } = await ctx.env.DB.prepare(`SELECT * FROM notes WHERE chat_id = ? AND id IN (${marks})`)
       .bind(ctx.chatId, ...ids).all();
     await deleteImages(ctx.env, rows);
+    await logHistory(ctx, noteHist("undo", rows));
     const r = await ctx.env.DB.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...ids).run();
     return r.meta.changes ? "↩️ 已撤銷" : "已經刪除或完成了";
   }
@@ -403,6 +412,7 @@ async function addTracking(ctx, { hosp, ampm, sid, number, label = null }) {
     c.number, sent, c.byCheckin ? 1 : 0, ci.state, ci.ahead ? JSON.stringify(ci.ahead) : null,
     ci.ahead ? ci.ahead.length : null, ctx.now, ctx.now + 55_000).run();
   const row = { id: res.meta.last_row_id, doctor: c.doctor, room: c.room, hosp, ampm, label };
+  await logHistory(ctx, [{ kind: "track", action: "add", ref_id: row.id, text: `${title(row)} ${number} 號` }]);
 
   const lines = [`✅ 已加入追蹤 ${title(row)}`, `你的號碼：${number}`];
   lines.push(c.number === null ? "目前尚未開始看診，開始後會通知"
@@ -457,7 +467,9 @@ async function listReply(ctx) {
 async function cancel(cmd, ctx) {
   const db = ctx.env.DB;
   if (cmd.all) {
+    const { results: all } = await db.prepare("SELECT * FROM trackings WHERE chat_id = ?").bind(ctx.chatId).all();
     const r = await db.prepare("DELETE FROM trackings WHERE chat_id = ?").bind(ctx.chatId).run();
+    await logHistory(ctx, all.map((t) => ({ kind: "track", action: "cancel", ref_id: t.id, text: `${title(t)} ${t.my_number} 號` })));
     return r.meta.changes ? `🗑 已取消全部 ${r.meta.changes} 筆追蹤` : "目前沒有追蹤中的看診";
   }
   const row = await db.prepare("SELECT * FROM trackings WHERE id = ? AND chat_id = ?").bind(cmd.id, ctx.chatId).first();
@@ -467,6 +479,7 @@ async function cancel(cmd, ctx) {
     return `找不到 #${cmd.id}，輸入「列表」查看編號`;
   }
   await db.prepare("DELETE FROM trackings WHERE id = ?").bind(cmd.id).run();
+  await logHistory(ctx, [{ kind: "track", action: "cancel", ref_id: row.id, text: `${title(row)} ${row.my_number} 號` }]);
   return `🗑 已取消 ${title(row)}，${row.my_number} 號`;
 }
 
@@ -564,6 +577,7 @@ async function menuCard(ctx) {
         section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
         row(msg("看記事", "記事", true), hint("記一筆", "note")),
         row(msg("⏰ 提醒列表", "提醒列表"), msg("記事說明", "記事 說明")),
+        row(msg("📜 歷史紀錄", "歷史")),
         ...(aiProvider(ctx.env) ? [row(hint("🤖 叫辦事小弟", "ai"))] : []),
       ],
     },
@@ -576,6 +590,8 @@ async function menuCard(ctx) {
 
 const MAX_NOTES_PER_CHAT = 100;
 const catOf = (key) => NOTE_CATEGORIES.find((c) => c.key === key) ?? NOTE_CATEGORIES.at(-1);
+const noteLabel = (n) => `${catOf(n.category).icon} ${catOf(n.category).name}：${n.text}`;
+const noteHist = (action, rows) => rows.map((n) => ({ kind: "note", action, ref_id: n.id, text: noteLabel(n) }));
 
 async function notesReply(ctx, header = null, extraQuick = [], category = null) {
   const { results: all } = await ctx.env.DB.prepare("SELECT * FROM notes WHERE chat_id = ? ORDER BY id").bind(ctx.chatId).all();
@@ -619,6 +635,7 @@ async function noteAdd(cmd, ctx) {
     db.prepare("INSERT INTO notes (chat_id, category, text, created_at) VALUES (?, ?, ?, ?)").bind(ctx.chatId, e.category, e.text, ctx.now)));
 
   const ids = results.map((r) => r.meta.last_row_id);
+  await logHistory(ctx, noteHist("add", entries.map((e, i) => ({ ...e, id: ids[i] }))));
   // 依分類整理：「🎒 帶：保鮮盒｜🛒 買：麵、晚餐」（提醒文字用，不含編號）
   const group = (fmt) => NOTE_CATEGORIES
     .map((c) => ({ c, items: entries.map((e, i) => ({ ...e, id: ids[i] })).filter((e) => e.category === c.key) }))
@@ -658,6 +675,7 @@ async function noteDone(cmd, ctx) {
   if (!results.length) return `找不到 ${cmd.ids.map((i) => `#${i}`).join("、")}，輸入「記事」查看編號`;
   await deleteImages(ctx.env, results);
   await db.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${marks})`).bind(ctx.chatId, ...cmd.ids).run();
+  await logHistory(ctx, noteHist("done", results));
   return notesReply(ctx, `✔️ 完成：${results.map((n) => n.text).join("、")}`);
 }
 
@@ -688,11 +706,13 @@ async function deleteByIds(ids, ctx) {
     await deleteImages(ctx.env, notes);
     const nm = notes.map(() => "?").join(",");
     await db.prepare(`DELETE FROM notes WHERE chat_id = ? AND id IN (${nm})`).bind(ctx.chatId, ...noteIds).run();
+    await logHistory(ctx, noteHist("delete", notes));
     lines.push(`🗑 已刪除記事：${notes.map((n) => `#${n.id} ${n.text}`).join("、")}`);
   }
   if (tracks.length) {
     const tm = tracks.map(() => "?").join(",");
     await db.prepare(`DELETE FROM trackings WHERE chat_id = ? AND id IN (${tm})`).bind(ctx.chatId, ...trackIds).run();
+    await logHistory(ctx, tracks.map((t) => ({ kind: "track", action: "cancel", ref_id: t.id, text: `${title(t)} ${t.my_number} 號` })));
     lines.push(...tracks.map((t) => `🗑 已取消追蹤：${title(t)}，${t.my_number} 號`));
   }
   const missing = ids.filter((i) => !noteIds.has(i) && !trackIds.has(i));
@@ -709,6 +729,7 @@ async function noteEdit(cmd, ctx) {
   const text = cmd.text ?? note.text;
   if (category === note.category && text === note.text) return "內容一樣，沒有修改";
   await db.prepare("UPDATE notes SET category = ?, text = ? WHERE id = ?").bind(category, text, note.id).run();
+  await logHistory(ctx, [{ kind: "note", action: "edit", ref_id: note.id, text: `${noteLabel(note)} → ${noteLabel({ category, text })}` }]);
   const from = catOf(note.category), to = catOf(category);
   const head = category === note.category
     ? `✏️ 已修改 #${note.id}：${note.text} → ${text}`
@@ -718,10 +739,11 @@ async function noteEdit(cmd, ctx) {
 
 async function noteClear(cmd, ctx) {
   const db = ctx.env.DB;
-  const { results: withImg } = cmd.category
-    ? await db.prepare("SELECT image_key FROM notes WHERE chat_id = ? AND category = ? AND image_key IS NOT NULL").bind(ctx.chatId, cmd.category).all()
-    : await db.prepare("SELECT image_key FROM notes WHERE chat_id = ? AND image_key IS NOT NULL").bind(ctx.chatId).all();
-  await deleteImages(ctx.env, withImg);
+  const { results: rows } = cmd.category
+    ? await db.prepare("SELECT * FROM notes WHERE chat_id = ? AND category = ?").bind(ctx.chatId, cmd.category).all()
+    : await db.prepare("SELECT * FROM notes WHERE chat_id = ?").bind(ctx.chatId).all();
+  await deleteImages(ctx.env, rows);
+  await logHistory(ctx, noteHist("clear", rows));
   const r = cmd.category
     ? await db.prepare("DELETE FROM notes WHERE chat_id = ? AND category = ?").bind(ctx.chatId, cmd.category).run()
     : await db.prepare("DELETE FROM notes WHERE chat_id = ?").bind(ctx.chatId).run();
@@ -731,6 +753,63 @@ async function noteClear(cmd, ctx) {
 
 // ── AI 小幫手 ──
 
+const IMG_REF = /這張|那張|這個圖|圖片|照片|相片|截圖|單子|通知單|聯絡簿|藥袋|藥單|收據|發票|帳單|繳費單|看一下|看看|幫我看|讀一下|上面寫|裡面寫|寫什麼/;
+const IMG_FOLLOW = /記下|記起來|記一下|幫我記|整理|提醒我|加到|存起來|都記|上面的/;
+const LAST_MEDIA_TTL = 10 * 60_000;
+const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const MAX_VOICE_MS = 90_000;
+
+/**
+ * 語音訊息：用 Gemini 聽寫，再當成打字處理
+ *   一對一：一律處理（不是指令就交給小弟）
+ *   群組：VOICE_MODE=call（預設）要先叫「小弟…」才處理；all＝指令和口語記事也會處理；off＝不處理
+ */
+async function onVoice(cmd, ctx) {
+  const env = ctx.env;
+  const mode = String(env.VOICE_MODE ?? "call").toLowerCase();
+  if (mode === "off") return null;
+  const say = (t) => (ctx.isDirect ? t : null);   // 群組裡失敗不吵大家
+  if (!env.GEMINI_API_KEY) return say("🎤 語音需要 Gemini 金鑰（GEMINI_API_KEY）");
+  if (cmd.duration > MAX_VOICE_MS) return say("🎤 語音太長了，90 秒內比較好");
+  const over = await aiQuota(ctx);
+  if (over) return say(over);
+  if (ctx.isDirect) await showLoading(env, ctx.chatId);
+
+  let text;
+  try {
+    const a = await getContent(env, cmd.messageId);
+    text = await transcribe(env, toBase64(a.body), "audio/m4a");
+  } catch (e) {
+    console.error("voice:", e);
+    return say(`🎤 聽寫失敗：${e.message}`);
+  }
+  text = text.replace(/[。．.]+$/, "").trim();
+  if (!text) return say("🎤 聽不清楚，再說一次？");
+
+  let next = parseCommand(text, ctx.now);
+  if (ctx.isDirect) next ??= { cmd: "ai", text };
+  else if (mode !== "all" && next?.cmd !== "ai") return null;   // 群組：沒叫小弟就當沒聽到
+  if (!next || next.cmd === "audio" || next.cmd === "number") return null;
+  if (next.cmd === "ai") next.skipQuota = true;                    // 聽寫已經算過一次
+
+  const out = await runCommand(next, ctx);
+  const rest = out == null ? [] : Array.isArray(out) ? out : [out];
+  return [`🎤「${text}」`, ...rest].slice(0, 5);
+}
+
+/** 每日 AI 次數上限，避免誤觸燒錢；超過回傳提示文字 */
+async function aiQuota(ctx) {
+  const db = ctx.env.DB;
+  const limit = parseInt(ctx.env.AI_DAILY_LIMIT ?? "200", 10);
+  const day = new Date(ctx.now + 8 * 3600_000).toISOString().slice(0, 10);
+  const key = `ai_count:${ctx.chatId}:${day}`;
+  const used = parseInt((await db.prepare("SELECT value FROM kv WHERE key = ?").bind(key).first())?.value ?? "0", 10);
+  if (used >= limit) return `🤖 今天已經叫我 ${used} 次了，達到上限（AI_DAILY_LIMIT=${limit}），明天再來吧`;
+  await db.prepare("INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)").bind(key, String(used + 1), ctx.now).run();
+  return null;
+}
+
 const AI_HISTORY_TURNS = 8;              // 保留最近幾則（問＋答）
 const AI_HISTORY_TTL = 3 * 3600_000;     // 超過 3 小時的對話不帶入
 
@@ -739,17 +818,45 @@ async function aiChat(cmd, ctx) {
   if (!aiProvider(env)) {
     return "🤖 AI 小幫手還沒設定金鑰。\n請在 worker 資料夾執行：\nnpx wrangler secret put ANTHROPIC_API_KEY\n（或 GEMINI_API_KEY）";
   }
-  if (!cmd.text) return textMsg(`${AI_HELP}\n\n可以問：\n・明天要帶什麼？\n・幫我記週五要買牛奶和吐司\n・小孩發燒 38 度要注意什麼？`);
+  // 要給 AI 看的照片：引用（回覆）的那張，或這個人 10 分鐘內傳的最後一張（句子有提到「這張 / 單子…」時）
+  // 要給 AI 看的照片：
+  //   1. 引用（回覆）的那則
+  //   2. 句子提到「這張 / 通知單…」：群組裡 10 分鐘內最後一張照片（誰傳的都算）
+  //   3. 接著剛才看過的照片說「幫我記下來 / 整理一下」：同一張再看一次
+  let imageId = cmd.quotedMessageId ?? null;
+  if (!imageId && cmd.text && IMG_REF.test(cmd.text)) {
+    const m = await db.prepare("SELECT message_id FROM last_media WHERE chat_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1")
+      .bind(ctx.chatId, ctx.now - LAST_MEDIA_TTL).first();
+    imageId = m?.message_id ?? null;
+  }
+  const seenKey = `ai_img:${ctx.chatId}`;
+  if (!imageId && cmd.text && IMG_FOLLOW.test(cmd.text)) {
+    const seen = await db.prepare("SELECT value FROM kv WHERE key = ? AND updated_at > ?").bind(seenKey, ctx.now - LAST_MEDIA_TTL).first();
+    imageId = seen?.value ?? null;
+  }
+  if (!cmd.text && imageId) cmd = { ...cmd, text: "幫我看這張" };
+  if (!cmd.text) return textMsg(`${AI_HELP}\n\n可以問：\n・明天要帶什麼？\n・幫我記週五要買牛奶和吐司\n・（先傳照片）小弟 幫我看這張通知單\n・小孩發燒 38 度要注意什麼？`);
 
-  // 每日上限，避免誤觸燒錢
-  const limit = parseInt(env.AI_DAILY_LIMIT ?? "200", 10);
-  const day = new Date(ctx.now + 8 * 3600_000).toISOString().slice(0, 10);
-  const key = `ai_count:${ctx.chatId}:${day}`;
-  const used = parseInt((await db.prepare("SELECT value FROM kv WHERE key = ?").bind(key).first())?.value ?? "0", 10);
-  if (used >= limit) return `🤖 今天已經問了 ${used} 次，達到上限（AI_DAILY_LIMIT=${limit}），明天再來吧`;
-  await db.prepare("INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)").bind(key, String(used + 1), ctx.now).run();
+  if (!cmd.skipQuota) {
+    const over = await aiQuota(ctx);
+    if (over) return over;
+  }
 
   if (ctx.chatId.startsWith("U")) await showLoading(env, ctx.chatId);
+
+  const images = [];
+  if (imageId) {
+    try {
+      const img = await getContent(env, imageId);
+      if (img.body.byteLength > MAX_AI_IMAGE_BYTES) return "🤖 這張圖太大了（上限 5MB），截圖或壓小一點再傳";
+      images.push({ mime: /png|gif|webp/.test(img.type) ? img.type : "image/jpeg", data: toBase64(img.body) });
+      await db.prepare("INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, ?)").bind(seenKey, imageId, ctx.now).run();
+    } catch (e) {
+      console.warn("讀取照片失敗", e.message);
+      // 引用的是文字訊息就沒有圖可以拿，照常回答；主動說「這張」卻拿不到才提示
+      if (!cmd.quotedMessageId) return "🤖 那張照片我拿不到了（太久以前或已刪除），再傳一次吧";
+    }
+  }
 
   // 給 AI 的背景資料
   const [{ results: notes }, { results: rems }, { results: tracks }, { results: hist }] = await Promise.all([
@@ -764,6 +871,7 @@ async function aiChat(cmd, ctx) {
     notes: notes.map((n) => `#${n.id} ${catOf(n.category).name}：${n.text}`).join("；"),
     reminders: rems.map((r) => `#${r.id} ${formatWhen(r.due_at, ctx.now)} ${r.text}`).join("；"),
     trackings: tracks.map((t) => `${title(t)} ${t.my_number} 號，目前 ${t.last_number ?? "未開始"}`).join("；"),
+    history: await recentHistoryText(ctx),
   });
   const messages = [...hist.reverse(), { role: "user", content: cmd.text.slice(0, 2000) }];
   // Claude 要求第一則是 user
@@ -771,7 +879,7 @@ async function aiChat(cmd, ctx) {
 
   let out;
   try {
-    out = parseAiOutput(await chat(env, system, messages));
+    out = parseAiOutput(await chat(env, system, messages, images));
   } catch (e) {
     console.error("AI:", e);
     return `🤖 AI 暫時無法回應：${e.name === "TimeoutError" ? "等太久了，請再試一次" : e.message}`;
@@ -788,6 +896,7 @@ async function aiChat(cmd, ctx) {
           .bind(ctx.chatId, category, text, ctx.now).run();
         const id = r.meta.last_row_id;
         noteIds.push(id);
+        await logHistory(ctx, noteHist("add", [{ id, category, text }]));
         let line = `📝 ${catOf(category).icon} ${catOf(category).name}：${text}（#${id}）`;
         const at = parseTaipeiTime(a.at);
         if (at && at > ctx.now + 30_000) {
@@ -813,7 +922,8 @@ async function aiChat(cmd, ctx) {
 
   const replyText = out.reply || (done.length ? "好的！" : "🤖 （沒有回應）");
   await db.batch([
-    db.prepare("INSERT INTO ai_history (chat_id, role, content, created_at) VALUES (?, 'user', ?, ?)").bind(ctx.chatId, cmd.text.slice(0, 2000), ctx.now),
+    db.prepare("INSERT INTO ai_history (chat_id, role, content, created_at) VALUES (?, 'user', ?, ?)")
+      .bind(ctx.chatId, (images.length ? "（附了一張照片）" : "") + cmd.text.slice(0, 2000), ctx.now),
     db.prepare("INSERT INTO ai_history (chat_id, role, content, created_at) VALUES (?, 'assistant', ?, ?)").bind(ctx.chatId, replyText.slice(0, 2000), ctx.now + 1),
     db.prepare("DELETE FROM ai_history WHERE created_at < ?").bind(ctx.now - AI_HISTORY_TTL),
   ]);
@@ -917,7 +1027,12 @@ async function photoAsk(id, ctx) {
 async function onImage(cmd, ctx) {
   const db = ctx.env.DB;
   const p = await db.prepare("SELECT * FROM pending_photo WHERE chat_id = ? AND user_id = ?").bind(ctx.chatId, ctx.userId).first();
-  if (!p || p.expires_at < ctx.now) return null; // 一般照片：不理會
+  if (!p || p.expires_at < ctx.now) {
+    // 一般照片：不回應，只記下編號，之後「小弟 幫我看這張」用得到
+    await db.prepare("INSERT OR REPLACE INTO last_media (chat_id, user_id, message_id, created_at) VALUES (?, ?, ?, ?)")
+      .bind(ctx.chatId, ctx.userId, cmd.messageId, ctx.now).run();
+    return null;
+  }
   await db.prepare("DELETE FROM pending_photo WHERE chat_id = ? AND user_id = ?").bind(ctx.chatId, ctx.userId).run();
   const note = await db.prepare("SELECT * FROM notes WHERE id = ? AND chat_id = ?").bind(p.note_id, ctx.chatId).first();
   if (!note) return "這筆記事已經不在了";
@@ -977,6 +1092,14 @@ export async function tick(env, now) {
   const cfg = loadConfig(env);
   await env.DB.prepare("DELETE FROM pending WHERE expires_at < ?").bind(now).run();
   await env.DB.prepare("DELETE FROM pending_photo WHERE expires_at < ?").bind(now).run();
+  // 每小時清一次舊資料：歷史保留 1 年、照片編號保留 1 天
+  if (now % 3_600_000 < 60_000) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM history WHERE created_at < ?").bind(now - 365 * 86400_000),
+      env.DB.prepare("DELETE FROM last_media WHERE created_at < ?").bind(now - 86400_000),
+    ]).catch((e) => console.error("cleanup:", e));
+  }
+
   // 到期的提醒
   let byChat = new Map();
   try {
@@ -1047,6 +1170,8 @@ async function checkOne(row, cfg, ctx) {
   const db = ctx.env.DB;
   if (!row.service_id || isExpired(row, cfg, ctx.now)) {
     await db.prepare("DELETE FROM trackings WHERE id = ?").bind(row.id).run();
+    await logHistory({ ...ctx, chatId: row.chat_id }, [{ kind: "track", action: "end", ref_id: row.id,
+      text: `${title(row)} ${row.my_number} 號（超過 ${cfg.maxHours} 小時自動移除）` }], { system: true });
     return [row.service_id
       ? `⏹ ${title(row)}｜已追蹤超過 ${cfg.maxHours} 小時，自動移除（最後燈號 ${row.last_number ?? "未知"}，你是 ${row.my_number} 號）`
       : `⏹ #${row.id}｜舊版追蹤資料，已移除，請重新追蹤`];
@@ -1063,6 +1188,9 @@ async function checkOne(row, cfg, ctx) {
 
   if (result.done) {
     await db.prepare("DELETE FROM trackings WHERE id = ?").bind(row.id).run();
+    const why = result.messages.find((m) => /輪到|看診中|過號|不在候診/.test(m))?.match(/輪到了|看診中|已過號|過號|不在候診清單/)?.[0];
+    await logHistory({ ...ctx, chatId: row.chat_id }, [{ kind: "track", action: "end", ref_id: row.id,
+      text: `${title(row)} ${row.my_number} 號${why ? `（${why}）` : ""}` }], { system: true });
   } else {
     const keys = Object.keys(result.update);
     if (keys.length) {

@@ -489,3 +489,20 @@ test("ai: 誒小弟 / 嗨小弟", () => {
   assert.deepEqual(parseCommand("hey 小弟 明天要帶什麼"), { cmd: "ai", text: "明天要帶什麼" });
   assert.deepEqual(parseCommand("那個辦事小弟，幫我記買牛奶"), { cmd: "ai", text: "幫我記買牛奶" });
 });
+
+test("history: 指令", () => {
+  assert.deepEqual(parseCommand("歷史"), { cmd: "history", kind: null });
+  assert.deepEqual(parseCommand("紀錄"), { cmd: "history", kind: null });
+  assert.deepEqual(parseCommand("歷史 記事"), { cmd: "history", kind: "note" });
+  assert.deepEqual(parseCommand("記事紀錄"), { cmd: "history", kind: "note" });
+  assert.deepEqual(parseCommand("追蹤 歷史"), { cmd: "history", kind: "track" });
+  assert.deepEqual(parseCommand("歷史追蹤"), { cmd: "history", kind: "track" });
+  assert.deepEqual(parseCommand("歷史 牛奶"), { cmd: "history", keyword: "牛奶" });
+  assert.equal(parseCommand("追蹤 25 王小明").cmd, "add");
+});
+import { formatHistoryLine } from "../src/history.js";
+test("history: 顯示格式", () => {
+  const now = Date.UTC(2026, 9, 26, 6, 0);
+  const line = formatHistoryLine({ kind: "note", action: "done", text: "🛒 買：牛奶", user_name: "媽媽", created_at: now - 3600_000 }, now);
+  assert.equal(line, "今天 10/26 13:00｜媽媽｜✔️ 完成 🛒 買：牛奶");
+});

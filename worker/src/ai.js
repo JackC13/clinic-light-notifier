@@ -21,16 +21,60 @@ export function aiProvider(env) {
  * @param {object} env
  * @param {string} system
  * @param {{role: "user"|"assistant", content: string}[]} messages
+ * @param {{mime: string, data: string}[]} images 附在最後一則使用者訊息的圖片（base64）
  * @returns {Promise<string>}
  */
-export async function chat(env, system, messages) {
+export async function chat(env, system, messages, images = []) {
   const provider = aiProvider(env);
   if (!provider) throw new Error("尚未設定 AI 金鑰");
   const signal = AbortSignal.timeout(TIMEOUT_MS);
-  return provider === "claude" ? claude(env, system, messages, signal) : gemini(env, system, messages, signal);
+  return provider === "claude" ? claude(env, system, messages, signal, images) : gemini(env, system, messages, signal, images);
 }
 
-async function claude(env, system, messages, signal) {
+/** 語音轉文字（只有 Gemini 能聽語音） */
+export async function transcribe(env, data, mime = "audio/m4a") {
+  if (!env.GEMINI_API_KEY) throw new Error("語音需要 Gemini 金鑰");
+  const base = env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com";
+  const model = env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+  const res = await fetch(`${base}/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          { inlineData: { mimeType: mime, data } },
+          { text: "把這段語音逐字聽寫成繁體中文（台灣用語）。只輸出聽寫的文字，不要加說明、引號或標點以外的符號。聽不清楚就輸出空字串。" },
+        ],
+      }],
+      generationConfig: { maxOutputTokens: 512 },
+    }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Gemini API ${res.status}：${j.error?.message ?? "未知錯誤"}`);
+  return (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
+}
+
+/** ArrayBuffer → base64（Workers 沒有 Buffer） */
+export function toBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+async function claude(env, system, messages, signal, images = []) {
+  if (images.length) {
+    const last = messages.at(-1);
+    messages = [...messages.slice(0, -1), {
+      role: "user",
+      content: [
+        ...images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mime, data: im.data } })),
+        { type: "text", text: last.content },
+      ],
+    }];
+  }
   const base = env.ANTHROPIC_API_BASE || "https://api.anthropic.com";
   const res = await fetch(`${base}/v1/messages`, {
     method: "POST",
@@ -52,7 +96,7 @@ async function claude(env, system, messages, signal) {
   return (j.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("");
 }
 
-async function gemini(env, system, messages, signal) {
+async function gemini(env, system, messages, signal, images = []) {
   const base = env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com";
   const model = env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
   const res = await fetch(`${base}/v1beta/models/${model}:generateContent`, {
@@ -61,7 +105,13 @@ async function gemini(env, system, messages, signal) {
     headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+      contents: messages.map((m, i) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [
+          ...(i === messages.length - 1 ? images.map((im) => ({ inlineData: { mimeType: im.mime, data: im.data } })) : []),
+          { text: m.content },
+        ],
+      })),
       generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS, responseMimeType: "application/json" },
     }),
   });
@@ -95,7 +145,7 @@ export function parseTaipeiTime(s) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-export function buildSystemPrompt({ nowText, notes, reminders, trackings }) {
+export function buildSystemPrompt({ nowText, notes, reminders, trackings, history = "" }) {
   return [
     "你是這個 LINE 家庭群組的辦事小弟，大家叫你「小弟」「辦事小弟」或「小幫手」。",
     "個性：Z 世代、做事很專心、講話直率不囉嗦。交代的事就確實辦好，辦完簡單回報，不邀功也不客套。",
@@ -116,6 +166,13 @@ export function buildSystemPrompt({ nowText, notes, reminders, trackings }) {
     `【記事】${notes || "（沒有）"}`,
     `【提醒】${reminders || "（沒有）"}`,
     `【看診追蹤】${trackings || "（沒有）"}`,
+    `【最近紀錄】（誰在什麼時間新增 / 完成了什麼，回答「誰買了」「什麼時候記的」這類問題時參考）${history || "（沒有）"}`,
+    "",
+    "使用者有時會附上照片（學校通知單、藥袋、帳單、收據、截圖…）：",
+    "・先用一兩句講重點（日期、時間、金額、要帶 / 要做的事），看不清楚就直說。",
+    "・使用者要你記下、整理或提醒時，把裡面要帶的、要買的、要做的事用 actions 新增，有日期就填 at。",
+    "・只是問內容的話就回答，最後問一句要不要幫忙記下來。",
+    "・藥袋只轉述上面寫的用法用量，不要自己給建議。",
     "",
     "你可以幫忙新增記事或提醒，但只在使用者明確要你記下、提醒時才做，不要自作主張。",
     "記事分類：buy（買）、bring（帶）、todo（做）、trip（出國）、other（其他）。",
