@@ -470,3 +470,14 @@ test("notes: 問「要買什麼」的各種說法", () => {
   }
   assert.equal(parseCommand("你要買什麼"), null);
 });
+
+test("ai: 叫小弟、辦事小弟", () => {
+  assert.deepEqual(parseCommand("小弟 明天要帶什麼"), { cmd: "ai", text: "明天要帶什麼" });
+  assert.deepEqual(parseCommand("辦事小弟，幫我記週五買牛奶"), { cmd: "ai", text: "幫我記週五買牛奶" });
+  assert.deepEqual(parseCommand("欸小弟 你在嗎"), { cmd: "ai", text: "你在嗎" });
+  assert.deepEqual(parseCommand("小弟明天要帶什麼"), { cmd: "ai", text: "明天要帶什麼" });
+  assert.deepEqual(parseCommand("小弟！"), { cmd: "ai", text: "" });
+  assert.deepEqual(parseCommand("AI 你好"), { cmd: "ai", text: "你好" });
+  assert.equal(parseCommand("小弟弟今天很乖"), null);
+  assert.equal(parseCommand("我小弟今天來"), null);
+});

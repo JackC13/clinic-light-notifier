@@ -473,7 +473,7 @@ async function cancel(cmd, ctx) {
 // ───────────────────────── 選單卡片 ─────────────────────────
 
 const HINTS = {
-  ai: textMsg("🤖 開頭打「AI」再接問題，或在群組 @機器人：\n　AI 明天要帶什麼？\n　AI 幫我記週五要買牛奶和吐司\n　AI 小孩發燒 38 度要注意什麼？"),
+  ai: textMsg("🤖 開頭叫「小弟」（或辦事小弟、小幫手、AI），或在群組 @機器人：\n　小弟 明天要帶什麼？\n　辦事小弟 幫我記週五要買牛奶和吐司\n　小弟 小孩發燒 38 度要注意什麼？"),
   lookup: textMsg("🔎 直接輸入「燈號 醫師名」\n例：燈號 王小明"),
   track: textMsg("🩺 直接輸入「追蹤 號碼 醫師名」最快\n例：追蹤 25 王小明\n\n或用按鈕一步一步選：", [quickText("用按鈕選", "追蹤")]),
   note: textMsg([
@@ -564,7 +564,7 @@ async function menuCard(ctx) {
         section("📝 記事", n.c ? `${n.c} 筆` : "空的"),
         row(msg("看記事", "記事", true), hint("記一筆", "note")),
         row(msg("⏰ 提醒列表", "提醒列表"), msg("記事說明", "記事 說明")),
-        ...(aiProvider(ctx.env) ? [row(hint("🤖 問 AI 小幫手", "ai"))] : []),
+        ...(aiProvider(ctx.env) ? [row(hint("🤖 叫辦事小弟", "ai"))] : []),
       ],
     },
     styles: { header: { separator: false } },
