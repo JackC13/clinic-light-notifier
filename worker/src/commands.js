@@ -32,7 +32,10 @@ function parseTerms(tokens) {
 
 export function parseCommand(raw, now = Date.now()) {
   const text = String(raw ?? "").replace(/　/g, " ").trim();
-  const [head = "", ...tokens] = text.split(/\s+/);
+  let [head = "", ...tokens] = text.split(/\s+/);
+  // 手機常不打空格：「完成100」「取消3」「附圖3」「備註3帶健保卡」
+  const glue = head.match(/^(完成|勾|done|取消|cancel|停止|附圖|加圖|看圖|備註|註記)(#?\d[\d,、，#]*)(.*)$/i);
+  if (glue) tokens = [glue[2], ...(glue[3] ? [glue[3]] : []), ...tokens], head = glue[1];
   const key = head.toLowerCase();
 
   // AI 小幫手：「AI 明天要帶什麼」「問AI …」「小幫手 …」「小弟 …」「辦事小弟 …」「欸小弟 …」

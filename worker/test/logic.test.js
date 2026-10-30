@@ -506,3 +506,15 @@ test("history: 顯示格式", () => {
   const line = formatHistoryLine({ kind: "note", action: "done", text: "🛒 買：牛奶", user_name: "媽媽", created_at: now - 3600_000 }, now);
   assert.equal(line, "今天 10/26 13:00｜媽媽｜✔️ 完成 🛒 買：牛奶");
 });
+
+test("指令不加空格也可以", () => {
+  assert.deepEqual(parseCommand("完成100"), { cmd: "noteDone", ids: [100] });
+  assert.deepEqual(parseCommand("完成3,5"), { cmd: "noteDone", ids: [3, 5] });
+  assert.deepEqual(parseCommand("完成#12"), { cmd: "noteDone", ids: [12] });
+  assert.deepEqual(parseCommand("取消3"), { cmd: "cancel", id: 3 });
+  assert.deepEqual(parseCommand("附圖3"), { cmd: "photoAsk", id: 3 });
+  assert.deepEqual(parseCommand("看圖3"), { cmd: "photoShow", id: 3 });
+  assert.deepEqual(parseCommand("備註3帶健保卡"), { cmd: "label", id: 3, text: "帶健保卡" });
+  assert.deepEqual(parseCommand("取消提醒3"), { cmd: "remindCancel", id: 3 });
+  assert.equal(parseCommand("完成了"), null);
+});
