@@ -65,6 +65,29 @@ test("command: 燈號 / 列表 / 取消 / 號碼 / 閒聊", () => {
   assert.equal(parseCommand("列表很長"), null);
 });
 
+test("command: 東西在前、記得在中間也算記事", () => {
+  const note = (t) => parseCommand(t)?.entries;
+  assert.deepEqual(note("出國 耳機記得充電"), [{ category: "trip", text: "耳機充電" }]);
+  assert.deepEqual(note("哥的奶瓶要記得"), [{ category: "other", text: "哥的奶瓶" }]);
+  assert.deepEqual(note("哥的奶瓶記得帶"), [{ category: "bring", text: "哥的奶瓶" }]);
+  assert.deepEqual(note("耳機記得充電"), [{ category: "todo", text: "耳機充電" }]);
+  assert.deepEqual(note("耳機記得充電喔"), [{ category: "todo", text: "耳機充電" }]);
+  assert.deepEqual(note("健保卡記得帶！"), [{ category: "bring", text: "健保卡" }]);
+  assert.deepEqual(note("牛奶記得買"), [{ category: "buy", text: "牛奶" }]);
+  assert.deepEqual(note("出國 轉接頭記得買"), [{ category: "trip", text: "買轉接頭" }]);
+  const dated = parseCommand("明天哥的奶瓶記得帶");
+  assert.deepEqual(dated.entries, [{ category: "bring", text: "哥的奶瓶" }]);
+  assert.ok(dated.remindAt);
+  // 原本的說法不受影響
+  assert.deepEqual(note("記得帶哥的奶瓶"), [{ category: "bring", text: "哥的奶瓶" }]);
+  assert.deepEqual(note("lego要比價"), [{ category: "todo", text: "lego要比價" }]);
+  // 閒聊不記
+  for (const t of ["我記得他有買", "我記得", "你要記得", "他記得帶", "大家記得帶", "小孩記得帶",
+    "我不記得了", "這個我記得", "昨天記得帶", "東西記得帶", "有記得帶嗎", "我有記得帶", "記得嗎"]) {
+    assert.equal(parseCommand(t), null, t);
+  }
+});
+
 // ── 監控邏輯 ──
 test("monitor: 標題", () => {
   assert.equal(title(row()), "#3 王小明（兒童醫院 下午 01診）");
