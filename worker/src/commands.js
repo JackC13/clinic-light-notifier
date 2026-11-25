@@ -230,7 +230,9 @@ const PAREN = /\s*[（(][^）)]*[）)]?/g;
 
 // 「lego要比價」：某樣東西 + 要 + 待辦動詞
 const TODO_VERBS = "比價|比較|退貨|退款|退|換貨|換|送修|修理|修|保養|驗車|洗|繳費|繳|付款|轉帳|寄|收|還|歸還|預約|掛號|訂位|訂|報名|領|取貨|拿|查|問|整理|清|丟|回覆|回電|聯絡|簽名|簽|填|印|列印|充電|加油|續約|取消|退訂|備份|更新|充值|儲值|加值";
-const TODO_RE = new RegExp(`^(?:([^\\s，,、]{1,12}?)\\s*)?(?:要|得|需要|該)\\s*((?:${TODO_VERBS}).{0,20})$`);
+const TODO_RE = new RegExp(`^(?:([^\\s，,、]{1,12}?)\\s*)?(?:要|(?<!記)得|需要|該)\\s*((?:${TODO_VERBS}).{0,20})$`);
+// 「哥的奶瓶記得帶」「耳機記得充電」「出國 耳機記得充電」「哥的奶瓶要記得」：東西在前、記得在中間
+const MID_REMIND = new RegExp(`^(?:(出國)\\s*)?([^\\s，,、；;][^，,、；;\\n]{0,19}?)\\s*(?:也|還)?(?:要)?\\s*(?:記得|別忘了|別忘記|不要忘了|不要忘記)\\s*(?:要\\s*)?(帶|買|${TODO_VERBS})?$`);
 // 「學校要帶…」「明天得買…」：句首的場合
 const CONTEXT = /^([^\s]{1,6}?)\s*(?:要|需要|(?<![記曉懂覺])得)\s*(?=帶|買)/;
 const PRONOUN = /我|你|他|她|大家/;
@@ -258,6 +260,11 @@ export function parseNaturalNote(raw) {
   if (r) {
     reminded = true;
     body = body.slice(r[0].length).replace(/^要\s*/, "");
+  }
+
+  if (!reminded) {
+    const mid = body.replace(TRAILING, "").match(MID_REMIND);
+    if (mid) return midRemindNote(mid);
   }
 
   // 「lego要比價」「冷氣要送修」「(明天)要繳費」→ ✅ 做
@@ -347,6 +354,28 @@ export function parseNaturalNote(raw) {
     }
   }
   return { cmd: "noteAdd", entries, natural: true };
+}
+
+// 「昨天記得帶」「東西記得帶」：記得前面不是東西
+const VAGUE = /^(?:今天|明天|後天|昨天|前天|今晚|明早|早上|晚上|下午|中午|等一下|等等|待會兒?|剛剛|剛才|之前|以前|上次|下次|每次|平常|東西|這個|那個|這些|那些|這|那|都|也|還|有|要)$/;
+
+function midRemindNote([, abroad, rawItem, verb]) {
+  const item = rawItem.replace(MEASURE, "").trim();
+  const core = item.replace(PAREN, "").replace(QTY, "").replace(/^(?:新的|新|舊的|備用的?)/, "");
+  // 「我記得…」「他要記得」「你記得喔」是在聊天
+  if (!core || VAGUE.test(core) || PRONOUN.test(core) || PEOPLE.test(core) || CHATTY.test(core) || wordLength(core) > 14) return null;
+  let category, text;
+  if (verb === "帶" || verb === "買") {
+    category = abroad ? "trip" : verb === "帶" ? "bring" : "buy";
+    text = abroad && verb === "買" ? `買${item}` : item;
+  } else if (verb) {
+    category = abroad ? "trip" : "todo";
+    text = `${item}${verb}`;
+  } else {
+    category = abroad ? "trip" : "other";
+    text = item;
+  }
+  return { cmd: "noteAdd", entries: [{ category, text: text.slice(0, 30) }], natural: true };
 }
 
 /** 「買」「買什麼」「要買的東西」「出國帶什麼」「待辦」→ 分類 key */
