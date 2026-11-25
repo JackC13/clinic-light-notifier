@@ -102,6 +102,7 @@
 **設定**（在 `worker/` 資料夾）：
 
 ```bash
+nvm use                                     # 切到 .nvmrc 指定的 Node 22
 npx wrangler secret put ANTHROPIC_API_KEY   # Claude：console.anthropic.com → API Keys
 # 或
 npx wrangler secret put GEMINI_API_KEY      # Gemini：aistudio.google.com → Get API key
@@ -162,9 +163,10 @@ npm run deploy
 
 ## 部署（第一次）
 
-需要 Node.js 18 以上。以下指令都在 `worker/` 資料夾執行。
+需要 Node.js 22.12 以上（wrangler 的要求）。repo 根目錄有 `.nvmrc`，用 nvm 的話先執行 `nvm use`，只影響這個終端機視窗，不會改到其他專案的預設版本。以下指令都在 `worker/` 資料夾執行。
 
 ```bash
+nvm use                                # 切到 .nvmrc 指定的 Node 22（沒裝就先 nvm install）
 npm install
 npx wrangler login                     # 開瀏覽器登入 Cloudflare
 npx wrangler d1 create clinic-light    # 把輸出的 database_id 貼到 wrangler.toml
@@ -193,6 +195,7 @@ LINE Developers → Messaging API 分頁：Webhook URL 填 `https://clinic-light
 
 ```bash
 git pull
+nvm use                # 切到 .nvmrc 指定的 Node 22
 npm run db:migrate     # 有新的資料表變更時才會執行，重複執行沒關係
 npm run deploy
 ```
